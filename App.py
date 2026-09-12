@@ -129,8 +129,16 @@ for msg in st.session_state.messages[-4:]:
     else:
         st.sidebar.success(f"{rol_icono} {msg['content']}")
 
+# --- GESTIÓN DE COLA DE VOZ PENDIENTE ---
+if "speech_queue" not in st.session_state:
+    st.session_state.speech_queue = ""
+
+texto_a_decir = st.session_state.speech_queue
+st.session_state.speech_queue = "" # Limpiamos para que no se repita
+texto_js = texto_a_decir.replace("'", "\\'").replace('"', '\\"')
+
 # --- COMPONENTE UNIFICADO DE VOZ CON BOTÓN DE DESBLOQUEO TÁCTIL ---
-voice_component_html = """
+voice_component_html = f"""
 <div style="background-color: #f0f2f6; padding: 15px; border-radius: 10px; text-align: center;">
     <p style="font-family: sans-serif; font-size: 14px; color: #31333F; margin-bottom: 8px;">Control de Voz y Audio:</p>
     <button onclick="desbloquearYAblar('Bienvenido de nuevo jefe ¿en qué mierda puedo ayudarte?')" style="background-color: #007bff; color: white; border: none; padding: 8px 15px; border-radius: 15px; font-weight: bold; cursor: pointer; font-size: 13px; margin-bottom: 10px;">🔊 Activar Saludo de Voz</button>
@@ -143,88 +151,98 @@ voice_component_html = """
 let recognition;
 let isListening = false;
 
-function decirTexto(texto) {
-    if ('speechSynthesis' in window) {
+function decirTexto(texto) {{
+    if ('speechSynthesis' in window) {{
         window.speechSynthesis.cancel();
         const mensaje = new SpeechSynthesisUtterance(texto);
         mensaje.lang = 'es-ES';
         mensaje.rate = 1.0;
         mensaje.pitch = 1.0;
         window.speechSynthesis.speak(mensaje);
-    }
-}
+    }}
+}}
 
-function desbloquearYAblar(texto) {
-    if ('speechSynthesis' in window) {
+function desbloquearYAblar(texto) {{
+    if ('speechSynthesis' in window) {{
         const dummy = new SpeechSynthesisUtterance("");
         window.speechSynthesis.speak(dummy);
-        setTimeout(() => {
+        setTimeout(() => {{
             decirTexto(texto);
-        }, 100);
-    }
-}
+        }}, 100);
+    }}
+}}
 
-window.addEventListener('message', function(event) {
-    if (event.data && event.data.type === 'hablar') {
+// Reproducir automáticamente si hay texto en cola al cargar
+window.addEventListener('DOMContentLoaded', () => {{
+    const pendiente = "{texto_js}";
+    if (pendiente) {{
+        setTimeout(() => {{
+            decirTexto(pendiente);
+        }}, 500);
+    }}
+}});
+
+window.addEventListener('message', function(event) {{
+    if (event.data && event.data.type === 'hablar') {{
         decirTexto(event.data.texto);
-    }
-});
+    }}
+}});
 
-function toggleMic() {
+function toggleMic() {{
     const btn = document.getElementById('micBtn');
     const status = document.getElementById('status');
 
-    if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
+    if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {{
         alert('Tu navegador móvil no soporta reconocimiento de voz nativo. Usa Chrome o Safari.');
         return;
-    }
+    }}
 
-    if (!isListening) {
+    if (!isListening) {{
         const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
         recognition = new SpeechRecognition();
         recognition.lang = 'es-ES';
         recognition.continuous = false;
         recognition.interimResults = false;
 
-        recognition.onstart = function() {
+        recognition.onstart = function() {{
             isListening = true;
             btn.style.backgroundColor = '#28a745';
             btn.innerText = '🔴 Escuchando...';
             status.innerText = 'Habla ahora...';
-        };
+        }};
 
-        recognition.onresult = function(event) {
+        recognition.onresult = function(event) {{
             const speechToText = event.results[0][0].transcript;
             status.innerText = 'Capturado: "' + speechToText + '"';
-            window.parent.postMessage({type: 'streamlit:setComponentValue', value: speechToText}, '*');
-        };
+            window.parent.postMessage({{type: 'streamlit:setComponentValue', value: speechToText}}, '*');
+        }};
 
-        recognition.onerror = function(event) {
+        recognition.onerror = function(event) {{
             status.innerText = 'Error: ' + event.error;
             stopMic();
-        };
+        }};
 
-        recognition.onend = function() {
+        recognition.onend = function() {{
             stopMic();
-        };
+        }};
 
         recognition.start();
-    } else {
+    }} else {{
         stopMic();
-    }
-}
+    }}
+}}
 
-function stopMic() {
+function stopMic() {{
     isListening = false;
     const btn = document.getElementById('micBtn');
     const status = document.getElementById('status');
     btn.style.backgroundColor = '#FF4B4B';
     btn.innerText = '🎤 Iniciar Micrófono';
     status.innerText = 'En pausa';
-    if (recognition) {
+    if (recognition) {{
         recognition.stop();
-    }
-}
+    }}
+}}
 </script>
 """
 
@@ -320,19 +338,8 @@ if menu == "1. BUSCAR":
     else:
         st.info("No se encontraron registros coincidentes.")
         if txt_busqueda:
-            frase_no_encontrado = "Pfff que follón, ¿Eso no estabaaaaaa por la p de polea?"
-            components.html(f"""
-            <script>
-                if ('speechSynthesis' in window) {{
-                    window.speechSynthesis.cancel();
-                    const mensaje = new SpeechSynthesisUtterance('{frase_no_encontrado}');
-                    mensaje.lang = 'es-ES';
-                    mensaje.rate = 1.0;
-                    mensaje.pitch = 1.0;
-                    window.speechSynthesis.speak(mensaje);
-                }}
-            </script>
-            """, height=0)
+            st.session_state.speech_queue = "Pfff que follón, ¿Eso no estabaaaaaa por la p de polea?"
+            st.rerun()
 
 # ==========================================
 # 2. MODIFICAR & MOVER
@@ -456,66 +463,4 @@ elif menu == "2. MODIFICAR & MOVER":
                                 """, (i_nombre, i_cant, receptor.strip(), admin_id.strip(), fecha_dev.strftime("%Y-%m-%d")))
                                 
                         conn.commit()
-                        conn.close()
-                        st.success("¡Movimiento y registro de préstamo procesados correctamente!")
-                        
-                        if dest_loc == "Préstamos":
-                            frase_prestamo = "tu sigue, tú sigue mariquita, no crees en dios y vas a creer en ala."
-                            components.html(f"""
-                            <script>
-                                if ('speechSynthesis' in window) {{
-                                    window.speechSynthesis.cancel();
-                                    const mensaje = new SpeechSynthesisUtterance('{frase_prestamo}');
-                                    mensaje.lang = 'es-ES';
-                                    mensaje.rate = 1.0;
-                                    mensaje.pitch = 1.0;
-                                    window.speechSynthesis.speak(mensaje);
-                                }}
-                            </script>
-                            """, height=0)
-                        
-                        st.rerun()
-
-# ==========================================
-# 3. LOCALIZACIONES
-# ==========================================
-elif menu == "3. LOCALIZACIONES":
-    st.header("🏠 Gestión de Localizaciones y Sublocalizaciones")
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        with st.form("form_loc"):
-            nueva_loc = st.text_input("Nombre de la Localización")
-            if st.form_submit_button("Crear Localización") and nueva_loc.strip():
-                try:
-                    conn = get_connection()
-                    cursor = conn.cursor()
-                    cursor.execute("INSERT INTO localizaciones (nombre_localizacion) VALUES (?)", (nueva_loc.strip(),))
-                    conn.commit()
-                    conn.close()
-                    st.success("Localización creada.")
-                    st.rerun()
-                except sqlite3.IntegrityError:
-                    st.error("Ya existe.")
-                    
-    with col2:
-        conn = get_connection()
-        cursor = conn.cursor()
-        cursor.execute("SELECT nombre_localizacion FROM localizaciones")
-        locs_padre = [r[0] for r in cursor.fetchall()]
-        conn.close()
-        
-        with st.form("form_subloc"):
-            loc_padre = st.selectbox("Localización Padre", locs_padre if locs_padre else ["Crea una primero"])
-            nueva_subloc = st.text_input("Nombre de la Sublocalización")
-            if st.form_submit_button("Crear Sublocalización") and nueva_subloc.strip() and locs_padre:
-                conn = get_connection()
-                cursor = conn.cursor()
-                cursor.execute("SELECT id FROM localizaciones WHERE nombre_localizacion = ?", (loc_padre,))
-                res = cursor.fetchone()
-                if res:
-                    cursor.execute("INSERT INTO sublocalizaciones (localizacion_id, nombre_sublocalizacion) VALUES (?, ?)", (res[0], nueva_subloc.strip()))
-                    conn.commit()
-                    conn.close()
-                    st.success("Sublocalización añadida.")
-                    st.rerun()
+      
