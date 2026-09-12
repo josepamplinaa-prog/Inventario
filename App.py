@@ -129,11 +129,13 @@ for msg in st.session_state.messages[-4:]:
     else:
         st.sidebar.success(f"{rol_icono} {msg['content']}")
 
-# --- COMPONENTE UNIFICADO DE VOZ (SALUDO + RECONOCIMIENTO + ALERTAS DE AUDIO) ---
+# --- COMPONENTE UNIFICADO DE VOZ CON BOTÓN DE DESBLOQUEO TÁCTIL ---
 voice_component_html = """
 <div style="background-color: #f0f2f6; padding: 15px; border-radius: 10px; text-align: center;">
-    <p style="font-family: sans-serif; font-size: 14px; color: #31333F;">Administrador de Voz Activo:</p>
-    <button id="micBtn" onclick="toggleMic()" style="background-color: #FF4B4B; color: white; border: none; padding: 10px 20px; border-radius: 20px; font-weight: bold; cursor: pointer; font-size: 16px;">🎤 Iniciar Voz</button>
+    <p style="font-family: sans-serif; font-size: 14px; color: #31333F; margin-bottom: 8px;">Control de Voz y Audio:</p>
+    <button onclick="desbloquearYAblar('Bienvenido de nuevo jefe ¿en qué mierda puedo ayudarte?')" style="background-color: #007bff; color: white; border: none; padding: 8px 15px; border-radius: 15px; font-weight: bold; cursor: pointer; font-size: 13px; margin-bottom: 10px;">🔊 Activar Saludo de Voz</button>
+    <br>
+    <button id="micBtn" onclick="toggleMic()" style="background-color: #FF4B4B; color: white; border: none; padding: 10px 20px; border-radius: 20px; font-weight: bold; cursor: pointer; font-size: 16px;">🎤 Iniciar Micrófono</button>
     <p id="status" style="font-family: sans-serif; font-size: 12px; color: #666; margin-top: 10px;">Micrófono inactivo</p>
 </div>
 
@@ -148,21 +150,19 @@ function decirTexto(texto) {
         mensaje.lang = 'es-ES';
         mensaje.rate = 1.0;
         mensaje.pitch = 1.0;
-        
-        setTimeout(() => {
-            window.speechSynthesis.speak(mensaje);
-        }, 300);
+        window.speechSynthesis.speak(mensaje);
     }
 }
 
-if (!window.saludoRealizado) {
-    window.saludoRealizado = true;
-    window.onload = function() {
-        decirTexto("Bienvenido de nuevo jefe ¿en qué mierda puedo ayudarte?");
-    };
-    setTimeout(() => {
-        decirTexto("Bienvenido de nuevo jefe ¿en qué mierda puedo ayudarte?");
-    }, 500);
+function desbloquearYAblar(texto) {
+    if ('speechSynthesis' in window) {
+        // Truco para desbloquear el audio en móviles mediante interacción táctil
+        const dummy = new SpeechSynthesisUtterance("");
+        window.speechSynthesis.speak(dummy);
+        setTimeout(() => {
+            decirTexto(texto);
+        }, 100);
+    }
 }
 
 window.addEventListener('message', function(event) {
@@ -220,7 +220,7 @@ function stopMic() {
     const btn = document.getElementById('micBtn');
     const status = document.getElementById('status');
     btn.style.backgroundColor = '#FF4B4B';
-    btn.innerText = '🎤 Iniciar Voz';
+    btn.innerText = '🎤 Iniciar Micrófono';
     status.innerText = 'En pausa';
     if (recognition) {
         recognition.stop();
@@ -229,7 +229,7 @@ function stopMic() {
 </script>
 """
 
-components.html(voice_component_html, height=150)
+components.html(voice_component_html, height=180)
 
 texto_usuario = st.sidebar.text_input("O escribe tu orden aquí:", key="txt_input_gemini")
 
@@ -469,8 +469,4 @@ elif menu == "3. LOCALIZACIONES":
                 cursor.execute("SELECT id FROM localizaciones WHERE nombre_localizacion = ?", (loc_padre,))
                 res = cursor.fetchone()
                 if res:
-                    cursor.execute("INSERT INTO sublocalizaciones (localizacion_id, nombre_sublocalizacion) VALUES (?, ?)", (res[0], nueva_subloc.strip()))
-                    conn.commit()
-                    conn.close()
-                    st.success("Sublocalización añadida.")
-                    st.rerun()
+            
