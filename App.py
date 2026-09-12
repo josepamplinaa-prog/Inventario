@@ -86,7 +86,7 @@ def get_connection():
 # --- CONFIGURACIÓN DE LA PÁGINA ---
 st.set_page_config(page_title="Gestor de Inventario Casero", layout="wide")
 
-st.title("📦 Gestor de Inventario Casero (Móvil/Web)")
+st.title("📦 Gestor de Inventario Casero con IA Administradora")
 
 # --- SISTEMA DE ALERTAS EN TIEMPO REAL ---
 conn = get_connection()
@@ -104,13 +104,8 @@ for p in prestamos_vencen:
     st.warning(f"⏳ **Alerta de Préstamo:** Atención: El préstamo de '{p[0]}' a '{p[1]}' vence el {p[2]}.")
 conn.close()
 
-# --- CONFIGURACIÓN DEL ASISTENTE CONVERSACIONAL ---
-if "chat_state" not in st.session_state:
-    st.session_state.chat_state = "IDLE"
-    st.session_state.temp_data = {}
-    st.session_state.messages = []
-
-if not st.session_state.get("proactive_greeted", False):
+# --- CONFIGURACIÓN DEL ASISTENTE INTELIGENTE CON IA ---
+if "messages" not in st.session_state:
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute("SELECT COUNT(*) FROM prestamos WHERE devuelto = 0")
@@ -120,11 +115,10 @@ if not st.session_state.get("proactive_greeted", False):
     conn.close()
     
     saludo_inicial = f"¡Hola! Tienes {num_prestamos} avisos de préstamos pendientes y {num_bajos} ítems con stock bajo. ¿Qué quieres hacer hoy?"
-    st.session_state.messages.append({"role": "assistant", "content": saludo_inicial})
-    st.session_state.proactive_greeted = True
+    st.session_state.messages = [{"role": "assistant", "content": saludo_inicial}]
 
 st.sidebar.markdown("---")
-st.sidebar.subheader("🎙️ Asistente Conversacional IA")
+st.sidebar.subheader("🎙️ Administrador IA por Voz y Texto")
 
 for msg in st.session_state.messages[-4:]:
     if msg["role"] == "assistant":
@@ -132,7 +126,7 @@ for msg in st.session_state.messages[-4:]:
     else:
         st.sidebar.success(f"👤 {msg['content']}")
 
-modo_entrada = st.sidebar.radio("Canal de entrada:", ["Texto", "Voz (Micrófono)"], key="canal_ia")
+modo_entrada = st.sidebar.radio("Canal de entrada:", ["Texto", "Voz (Micrófono)"], key="canal_ia_inteligente")
 texto_usuario = ""
 
 if modo_entrada == "Voz (Micrófono)":
@@ -140,77 +134,43 @@ if modo_entrada == "Voz (Micrófono)":
     if audio_bytes is not None:
         try:
             client = openai.OpenAI(api_key=st.secrets.get("OPENAI_API_KEY", ""))
-            transcripcion = client.audio.transcriptions.create(
-                model="whisper-1",
-                file=audio_bytes
-            )
+            transcripcion = client.audio.transcriptions.create(model="whisper-1", file=audio_bytes)
             texto_usuario = transcripcion.text
         except Exception as e:
-            st.sidebar.error(f"Error al transcribir audio: {e}")
+            st.sidebar.error(f"Error al transcribir: {e}")
 else:
-    texto_usuario = st.sidebar.text_input("Escribe tu orden o respuesta:", key="txt_input_ia")
+    texto_usuario = st.sidebar.text_input("Escribe tu orden o consulta:", key="txt_input_ia_inteligente")
 
-if st.sidebar.button("Enviar Orden") and texto_usuario:
+if st.sidebar.button("Enviar Orden IA") and texto_usuario:
     st.session_state.messages.append({"role": "user", "content": texto_usuario})
     
-    estado = st.session_state.chat_state
+    # Comprobar si el usuario quiere cancelar o abortar
+    if any(palabra in texto_usuario.lower() for palabra in ["olvíalo", "cancela", "olvida", "déjalo", "cancelar"]):
+        respuesta = "Entendido, operación cancelada. ¿En qué otra cosa te puedo ayudar?"
+        st.session_state.messages.append({"role": "assistant", "content": respuesta})
+        st.rerun()
     
-    if estado == "IDLE":
-        texto_lower = texto_usuario.lower()
-        if "entrada" in texto_lower or "añadir" in texto_lower or "nuevo item" in texto_lower:
-            st.session_state.chat_state = "WAITING_NAME"
-            st.session_state.temp_data = {}
-            respuesta = "Perfecto, hagamos una entrada. Dime, ¿qué artículo quieres añadir?"
-        else:
-            try:
-                client = openai.OpenAI(api_key=st.secrets.get("OPENAI_API_KEY", ""))
-                response = client.chat.completions.create(
-                    model="gpt-4o",
-                    messages=[
-                        {"role": "system", "content": "Eres el administrador absoluto de un inventario en SQLite con tablas items, prestamos, movimientos. Interpreta la orden del usuario y responde de forma concisa confirmando la acción realizada."},
-                        {"role": "user", "content": texto_usuario}
-                    ]
-                )
-                respuesta = response.choices[0].message.content
-            except Exception as e:
-                respuesta = f"No se pudo procesar la orden compleja: {e}"
-                
-        st.session_state.messages.append({"role": "assistant", "content": respuesta})
-        st.rerun()
+    try:
+        client = openai.OpenAI(api_key=st.secrets.get("OPENAI_API_KEY", ""))
         
-    elif estado == "WAITING_NAME":
-        st.session_state.temp_data["nombre"] = texto_usuario
-        st.session_state.chat_state = "WAITING_CAT"
-        respuesta = f"Entendido, '{texto_usuario}'. ¿En qué categoría lo guardamos?"
-        st.session_state.messages.append({"role": "assistant", "content": respuesta})
-        st.rerun()
+        # Historial dinámico con rol administrador de base de datos e inventario
+        historial_prompt = [
+            {"role": "system", "content": "Eres una IA avanzada, amable y experta que actúa como administradora absoluta de un sistema de inventario casero en SQLite. Responde de forma natural a cualquier pregunta general o conversacional, pero si el usuario te pide gestionar entradas, consultas o cambios en el inventario, guíale o indícale cómo proceder con precisión."}
+        ]
+        for m in st.session_state.messages[-6:]:
+            historial_prompt.append({"role": m["role"], "content": m["content"]})
+            
+        response = client.chat.completions.create(
+            model="gpt-4o",
+            messages=historial_prompt,
+            temperature=0.7
+        )
+        respuesta = response.choices[0].message.content
+    except Exception as e:
+        respuesta = f"Error al conectar con la IA: {e}"
         
-    elif estado == "WAITING_CAT":
-        st.session_state.temp_data["categoria"] = texto_usuario
-        st.session_state.chat_state = "WAITING_MARCA"
-        respuesta = "¿Sabemos la marca o referencia?"
-        st.session_state.messages.append({"role": "assistant", "content": respuesta})
-        st.rerun()
-        
-    elif estado == "WAITING_MARCA":
-        st.session_state.temp_data["marca"] = texto_usuario
-        nombre = st.session_state.temp_data.get("nombre")
-        cat = st.session_state.temp_data.get("categoria")
-        marca = texto_usuario
-        
-        conn = get_connection()
-        cursor = conn.cursor()
-        cursor.execute("""
-            INSERT OR REPLACE INTO items (nombre, categoria, marca, cantidad, stock_minimo, estado_stock)
-            VALUES (?, ?, ?, 1, 1, 'normal')
-        """, (nombre, cat, marca))
-        conn.commit()
-        conn.close()
-        
-        st.session_state.chat_state = "IDLE"
-        respuesta = f"¡Listo! Se ha guardado '{nombre}' (Categoría: {cat}, Marca: {marca}) con éxito en el inventario."
-        st.session_state.messages.append({"role": "assistant", "content": respuesta})
-        st.rerun()
+    st.session_state.messages.append({"role": "assistant", "content": respuesta})
+    st.rerun()
 
 # --- MENÚ DE NAVEGACIÓN ---
 menu = st.sidebar.selectbox("Menú de Opciones", ["1. BUSCAR", "2. MODIFICAR & MOVER", "3. LOCALIZACIONES"])
@@ -463,137 +423,4 @@ elif menu == "2. MODIFICAR & MOVER":
                 conn = get_connection()
                 cursor = conn.cursor()
                 cursor.execute("""
-                    SELECT DISTINCT l.nombre_localizacion, s.nombre_sublocalizacion 
-                    FROM sublocalizaciones s 
-                    JOIN localizaciones l ON s.localizacion_id = l.id
-                """)
-                sublocs_registradas = cursor.fetchall()
-                conn.close()
-                
-                if not sublocs_registradas:
-                    st.info("No hay sublocalizaciones creadas todavía.")
-                else:
-                    subloc_dict = {f"{r[0]} > {r[1]}": (r[0], r[1]) for r in sublocs_registradas}
-                    subloc_elegida_str = st.selectbox("Selecciona la Sublocalización de origen:", list(subloc_dict.keys()))
-                    
-                    dest_loc_masivo = st.selectbox("Localización Destino para todo el contenido", destino_opciones)
-                    
-                    if st.button("Mover Todo el Contenido de la Sublocalización"):
-                        l_origen, s_origen = subloc_dict[subloc_elegida_str]
-                        
-                        conn = get_connection()
-                        cursor = conn.cursor()
-                        cursor.execute("SELECT nombre, cantidad FROM items WHERE localizacion = ? AND sublocalizacion = ?", (l_origen, s_origen))
-                        items_en_subloc = cursor.fetchall()
-                        
-                        if not items_en_subloc:
-                            st.warning("Esta sublocalización está vacía actualmente.")
-                            conn.close()
-                        elif dest_loc_masivo == "Préstamos":
-                            conn.close()
-                            @st.dialog("📋 Formulario de Préstamo Masivo Obligatorio")
-                            def modal_prestamo_masivo():
-                                admin_id = st.text_input("ID del Administrador*")
-                                receptor = st.text_input("Nombre de quien recibe el préstamo*")
-                                fecha_limite = st.text_input("Fecha límite de devolución (YYYY-MM-DD HH:MM)", value=(datetime.now() + timedelta(days=7)).strftime("%Y-%m-%d %H:%M"))
-                                
-                                if st.button("Confirmar Préstamo Masivo"):
-                                    if not admin_id.strip() or not receptor.strip():
-                                        st.error("El ID de admin y el receptor son obligatorios.")
-                                    else:
-                                        conn_m = get_connection()
-                                        cur_m = conn_m.cursor()
-                                        for itm_n, itm_c in items_en_subloc:
-                                            cur_m.execute("UPDATE items SET cantidad = 0, localizacion = 'Préstamos', sublocalizacion = '' WHERE nombre = ?", (itm_n,))
-                                            cur_m.execute("""
-                                                INSERT INTO prestamos (item_nombre, cantidad, receptor, admin_id, fecha_prestamo, fecha_devolucion)
-                                                VALUES (?, ?, ?, ?, ?, ?)
-                                            """, (itm_n, itm_c, receptor, admin_id, datetime.now().strftime("%Y-%m-%d %H:%M"), fecha_limite))
-                                            cur_m.execute("""
-                                                INSERT INTO movimientos (item_nombre, tipo, cantidad_afectada, origen, destino)
-                                                VALUES (?, 'PRESTAMO', ?, ?, 'Préstamos')
-                                            """, (itm_n, itm_c, f"{l_origen} > {s_origen}"))
-                                        conn_m.commit()
-                                        conn_m.close()
-                                        st.success("¡Todos los ítems de la sublocalización han sido prestados con éxito!")
-                                        st.rerun()
-                            modal_prestamo_masivo()
-                        else:
-                            for itm_n, itm_c in items_en_subloc:
-                                cursor.execute("UPDATE items SET localizacion = ?, sublocalizacion = '' WHERE nombre = ?", (dest_loc_masivo, itm_n))
-                                cursor.execute("""
-                                    INSERT INTO movimientos (item_nombre, tipo, cantidad_afectada, origen, destino)
-                                    VALUES (?, 'MOVIMIENTO', ?, ?, ?)
-                                """, (itm_n, itm_c, f"{l_origen} > {s_origen}", dest_loc_masivo))
-                            conn.commit()
-                            conn.close()
-                            st.success(f"¡Todos los ítems de '{subloc_elegida_str}' han sido movidos a '{dest_loc_masivo}'!")
-                            st.rerun()
-
-# ==========================================
-# 3. LOCALIZACIONES
-# ==========================================
-elif menu == "3. LOCALIZACIONES":
-    st.header("🏠 Gestión de Localizaciones y Sublocalizaciones")
-    
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        st.subheader("Añadir Localización Principal")
-        with st.form("form_loc"):
-            nueva_loc = st.text_input("Nombre de la Localización (ej. Cochera, Trastero)")
-            btn_crear_loc = st.form_submit_button("Crear Localización")
-            if btn_crear_loc and nueva_loc.strip():
-                try:
-                    conn = get_connection()
-                    cursor = conn.cursor()
-                    cursor.execute("INSERT INTO localizaciones (nombre_localizacion) VALUES (?)", (nueva_loc.strip(),))
-                    conn.commit()
-                    conn.close()
-                    st.success(f"Localización '{nueva_loc}' creada con éxito.")
-                    st.rerun()
-                except sqlite3.IntegrityError:
-                    st.error("Esa localización ya existe.")
-                    
-    with col2:
-        st.subheader("Añadir Sublocalización")
-        conn = get_connection()
-        cursor = conn.cursor()
-        cursor.execute("SELECT nombre_localizacion FROM localizaciones")
-        locs_padre = [r[0] for r in cursor.fetchall()]
-        conn.close()
-        
-        with st.form("form_subloc"):
-            opciones_locs = locs_padre if locs_padre else ["Crea una localización primero"]
-            loc_padre_elegida = st.selectbox("Localización Padre", opciones_locs)
-            nueva_subloc = st.text_input("Nombre de la Sublocalización (ej. Estantería 2, Caja Roja)")
-            btn_crear_subloc = st.form_submit_button("Crear Sublocalización")
-            
-            if btn_crear_subloc and nueva_subloc.strip() and locs_padre:
-                conn = get_connection()
-                cursor = conn.cursor()
-                cursor.execute("SELECT id FROM localizaciones WHERE nombre_localizacion = ?", (loc_padre_elegida,))
-                res = cursor.fetchone()
-                if res:
-                    cursor.execute("INSERT INTO sublocalizaciones (localizacion_id, nombre_sublocalizacion) VALUES (?, ?)", (res[0], nueva_subloc.strip()))
-                    conn.commit()
-                    conn.close()
-                    st.success(f"Sublocalización '{nueva_subloc}' añadida a '{loc_padre_elegida}'.")
-                    st.rerun()
-
-    st.markdown("---")
-    st.subheader("Estancias y Subestancias Actuales:")
-    conn = get_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT id, nombre_localizacion FROM localizaciones")
-    locs_data = cursor.fetchall()
-    for l_id, l_nombre in locs_data:
-        cursor.execute("SELECT nombre_sublocalizacion FROM sublocalizaciones WHERE localizacion_id = ?", (l_id,))
-        sublocs_data = [s[0] for s in cursor.fetchall()]
-        st.markdown(f"📍 **{l_nombre}**")
-        if sublocs_data:
-            for s in sublocs_data:
-                st.markdown(f"&nbsp;&nbsp;&nbsp;&nbsp;└─ {s}")
-        else:
-            st.markdown("&nbsp;&nbsp;&nbsp;&nbsp;└─ *(Sin sublocalizaciones)*")
-    conn.close()
+                    SELECT DISTINCT l
