@@ -156,7 +156,6 @@ if menu == "1. BUSCAR":
                 if estado_s in ["comprar", "agotado_negativo"]:
                     st.info(f"**Detalle Estado ({estado_s}):** {r[11]}")
             
-            # Historial de movimientos del ítem
             conn = get_connection()
             cursor = conn.cursor()
             cursor.execute("SELECT tipo, cantidad_afectada, origen, destino, fecha_hora FROM movimientos WHERE item_nombre = ?", (nombre,))
@@ -240,9 +239,11 @@ elif menu == "2. MODIFICAR & MOVER":
                     except Exception as e:
                         st.error(f"Error al guardar: {e}")
 
-    # 2.3 MOVER / PRESTAR
+    # 2.3 MOVER / PRESTAR (Con soporte múltiple, masivo por sublocalización y Modal de Préstamos)
     elif sub_menu == "2.3 Mover / Prestar Ítems":
-        st.subheader("🚚 Mover o Prestar Ítems")
+        st.subheader("🚚 Mover o Prestar Ítems / Sublocalizaciones")
+        
+        modo_mov = st.radio("¿Qué deseas mover?", ["Ítems específicos (Múltiple)", "Toda una Sublocalización completa (Masivo)"])
         
         conn = get_connection()
         cursor = conn.cursor()
@@ -253,54 +254,131 @@ elif menu == "2. MODIFICAR & MOVER":
         if not items_db:
             st.info("No hay ítems registrados en el inventario.")
         else:
-            item_dict = {f"{i[0]} (Stock: {i[1]} | Ubicación: {i[2]} > {i[3]})": i for i in items_db}
-            seleccion_item = st.selectbox("Selecciona un ítem para mover:", list(item_dict.keys()))
+            destino_opciones = locs + ["Préstamos"]
             
-            if seleccion_item:
-                i_nombre, i_cant, i_loc, i_sub = item_dict[seleccion_item]
+            if modo_mov == "Ítems específicos (Múltiple)":
+                item_dict = {f"{i[0]} (Stock: {i[1]} | Ubicación: {i[2]} > {i[3]})": i for i in items_db}
+                seleccion_items = st.multiselect("Selecciona uno o varios ítems a mover:", list(item_dict.keys()))
                 
-                with st.form("form_mover"):
-                    cant_a_mover = st.number_input("Cantidad a mover", min_value=1, max_value=int(i_cant) if i_cant > 0 else 1, value=1)
-                    
-                    destino_opciones = locs + ["Préstamos"]
-                    dest_loc = st.selectbox("Localización Destino", destino_opciones)
-                    
-                    st.markdown("---")
-                    st.write("Si el destino seleccionado es **Préstamos**, completa los campos siguientes:")
-                    admin_id = st.text_input("ID del Administrador")
-                    receptor = st.text_input("Nombre de quien recibe el préstamo")
-                    fecha_limite = st.text_input("Fecha límite de devolución (YYYY-MM-DD HH:MM)", value=(datetime.now() + timedelta(days=7)).strftime("%Y-%m-%d %H:%M"))
-                    
-                    btn_confirmar_mov = st.form_submit_button("Confirmar Movimiento")
-                    
-                    if btn_confirmar_mov:
-                        if cant_a_mover > i_cant:
-                            st.error("No puedes mover más cantidad de la disponible.")
-                        else:
-                            conn = get_connection()
-                            cursor = conn.cursor()
-                            nueva_cant = i_cant - cant_a_mover
-                            nueva_loc = "Préstamos" if dest_loc == "Préstamos" else dest_loc
+                dest_loc = st.selectbox("Localización Destino", destino_opciones)
+                
+                if st.button("Procesar Movimiento de Seleccionados"):
+                    if not seleccion_items:
+                        st.error("Selecciona al menos un ítem.")
+                    elif dest_loc == "Préstamos":
+                        # Abrir ventana emergente (Modal) obligatoria para Préstamos
+                        @st.dialog("📋 Formulario de Préstamo Obligatorio")
+                        def modal_prestamo_multiple():
+                            admin_id = st.text_input("ID del Administrador*")
+                            receptor = st.text_input("Nombre de quien recibe el préstamo*")
+                            fecha_limite = st.text_input("Fecha límite de devolución (YYYY-MM-DD HH:MM)", value=(datetime.now() + timedelta(days=7)).strftime("%Y-%m-%d %H:%M"))
                             
-                            cursor.execute("UPDATE items SET cantidad = ?, localizacion = ? WHERE nombre = ?", (nueva_cant, nueva_loc, i_nombre))
-                            
-                            tipo_mov = "MOVIMIENTO"
-                            if dest_loc == "Préstamos":
-                                tipo_mov = "PRESTAMO"
-                                cursor.execute("""
-                                    INSERT INTO prestamos (item_nombre, cantidad, receptor, admin_id, fecha_prestamo, fecha_devolucion)
-                                    VALUES (?, ?, ?, ?, ?, ?)
-                                """, (i_nombre, cant_a_mover, receptor, admin_id, datetime.now().strftime("%Y-%m-%d %H:%M"), fecha_limite))
-                                
+                            if st.button("Confirmar Préstamo"):
+                                if not admin_id.strip() or not receptor.strip():
+                                    st.error("El ID de admin y el receptor son obligatorios.")
+                                else:
+                                    conn = get_connection()
+                                    cursor = conn.cursor()
+                                    for sel in seleccion_items:
+                                        i_nombre, i_cant, i_loc, i_sub = item_dict[sel]
+                                        cursor.execute("UPDATE items SET cantidad = 0, localizacion = 'Préstamos', sublocalizacion = '' WHERE nombre = ?", (i_nombre,))
+                                        cursor.execute("""
+                                            INSERT INTO prestamos (item_nombre, cantidad, receptor, admin_id, fecha_prestamo, fecha_devolucion)
+                                            VALUES (?, ?, ?, ?, ?, ?)
+                                        """, (i_nombre, i_cant, receptor, admin_id, datetime.now().strftime("%Y-%m-%d %H:%M"), fecha_limite))
+                                        cursor.execute("""
+                                            INSERT INTO movimientos (item_nombre, tipo, cantidad_afectada, origen, destino)
+                                            VALUES (?, 'PRESTAMO', ?, ?, 'Préstamos')
+                                        """, (i_nombre, i_cant, f"{i_loc} > {i_sub}"))
+                                    conn.commit()
+                                    conn.close()
+                                    st.success("¡Préstamos registrados y ítems movidos con éxito!")
+                                    st.rerun()
+                        modal_prestamo_multiple()
+                    else:
+                        conn = get_connection()
+                        cursor = conn.cursor()
+                        for sel in seleccion_items:
+                            i_nombre, i_cant, i_loc, i_sub = item_dict[sel]
+                            cursor.execute("UPDATE items SET localizacion = ? WHERE nombre = ?", (dest_loc, i_nombre))
                             cursor.execute("""
                                 INSERT INTO movimientos (item_nombre, tipo, cantidad_afectada, origen, destino)
-                                VALUES (?, ?, ?, ?, ?)
-                            """, (i_nombre, tipo_mov, cant_a_mover, f"{i_loc} > {i_sub}", dest_loc))
-                            
+                                VALUES (?, 'MOVIMIENTO', ?, ?, ?)
+                            """, (i_nombre, i_cant, f"{i_loc} > {i_sub}", dest_loc))
+                        conn.commit()
+                        conn.close()
+                        st.success("¡Movimiento de los ítems realizado correctamente!")
+                        st.rerun()
+
+            else: # Modo Masivo por Sublocalización
+                conn = get_connection()
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT DISTINCT l.nombre_localizacion, s.nombre_sublocalizacion 
+                    FROM sublocalizaciones s 
+                    JOIN localizaciones l ON s.localizacion_id = l.id
+                """)
+                sublocs_registradas = cursor.fetchall()
+                conn.close()
+                
+                if not sublocs_registradas:
+                    st.info("No hay sublocalizaciones creadas todavía.")
+                else:
+                    subloc_dict = {f"{r[0]} > {r[1]}": (r[0], r[1]) for r in sublocs_registradas}
+                    subloc_elegida_str = st.selectbox("Selecciona la Sublocalización de origen:", list(subloc_dict.keys()))
+                    
+                    dest_loc_masivo = st.selectbox("Localización Destino para todo el contenido", destino_opciones)
+                    
+                    if st.button("Mover Todo el Contenido de la Sublocalización"):
+                        l_origen, s_origen = subloc_dict[subloc_elegida_str]
+                        
+                        conn = get_connection()
+                        cursor = conn.cursor()
+                        cursor.execute("SELECT nombre, cantidad FROM items WHERE localizacion = ? AND sublocalizacion = ?", (l_origen, s_origen))
+                        items_en_subloc = cursor.fetchall()
+                        
+                        if not items_en_subloc:
+                            st.warning("Esta sublocalización está vacía actualmente.")
+                            conn.close()
+                        elif dest_loc_masivo == "Préstamos":
+                            conn.close()
+                            @st.dialog("📋 Formulario de Préstamo Masivo Obligatorio")
+                            def modal_prestamo_masivo():
+                                admin_id = st.text_input("ID del Administrador*")
+                                receptor = st.text_input("Nombre de quien recibe el préstamo*")
+                                fecha_limite = st.text_input("Fecha límite de devolución (YYYY-MM-DD HH:MM)", value=(datetime.now() + timedelta(days=7)).strftime("%Y-%m-%d %H:%M"))
+                                
+                                if st.button("Confirmar Préstamo Masivo"):
+                                    if not admin_id.strip() or not receptor.strip():
+                                        st.error("El ID de admin y el receptor son obligatorios.")
+                                    else:
+                                        conn_m = get_connection()
+                                        cur_m = conn_m.cursor()
+                                        for itm_n, itm_c in items_en_subloc:
+                                            cur_m.execute("UPDATE items SET cantidad = 0, localizacion = 'Préstamos', sublocalizacion = '' WHERE nombre = ?", (itm_n,))
+                                            cur_m.execute("""
+                                                INSERT INTO prestamos (item_nombre, cantidad, receptor, admin_id, fecha_prestamo, fecha_devolucion)
+                                                VALUES (?, ?, ?, ?, ?, ?)
+                                            """, (itm_n, itm_c, receptor, admin_id, datetime.now().strftime("%Y-%m-%d %H:%M"), fecha_limite))
+                                            cur_m.execute("""
+                                                INSERT INTO movimientos (item_nombre, tipo, cantidad_afectada, origen, destino)
+                                                VALUES (?, 'PRESTAMO', ?, ?, 'Préstamos')
+                                            """, (itm_n, itm_c, f"{l_origen} > {s_origen}"))
+                                        conn_m.commit()
+                                        conn_m.close()
+                                        st.success("¡Todos los ítems de la sublocalización han sido prestados con éxito!")
+                                        st.rerun()
+                            modal_prestamo_masivo()
+                        else:
+                            for itm_n, itm_c in items_en_subloc:
+                                cursor.execute("UPDATE items SET localizacion = ?, sublocalizacion = '' WHERE nombre = ?", (dest_loc_masivo, itm_n))
+                                cursor.execute("""
+                                    INSERT INTO movimientos (item_nombre, tipo, cantidad_afectada, origen, destino)
+                                    VALUES (?, 'MOVIMIENTO', ?, ?, ?)
+                                """, (itm_n, itm_c, f"{l_origen} > {s_origen}", dest_loc_masivo))
                             conn.commit()
                             conn.close()
-                            
-                            st.success(f"Movimiento de '{i_nombre}' realizado correctamente.")
+                            st.success(f"¡Todos los ítems de '{subloc_elegida_str}' han sido movidos a '{dest_loc_masivo}'!")
                             st.rerun()
 
 # ==========================================
