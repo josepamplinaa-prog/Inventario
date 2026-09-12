@@ -134,7 +134,7 @@ if "speech_queue" not in st.session_state:
     st.session_state.speech_queue = ""
 
 texto_a_decir = st.session_state.speech_queue
-st.session_state.speech_queue = "" # Limpiamos para que no se repita
+st.session_state.speech_queue = "" 
 texto_js = texto_a_decir.replace("'", "\\'").replace('"', '\\"')
 
 # --- COMPONENTE UNIFICADO DE VOZ CON BOTÓN DE DESBLOQUEO TÁCTIL ---
@@ -172,7 +172,6 @@ function desbloquearYAblar(texto) {{
     }}
 }}
 
-// Reproducir automáticamente si hay texto en cola al cargar
 window.addEventListener('DOMContentLoaded', () => {{
     const pendiente = "{texto_js}";
     if (pendiente) {{
@@ -287,7 +286,7 @@ if st.sidebar.button("Enviar Orden a Gemini") and texto_usuario:
     st.rerun()
 
 # --- MENÚ DE NAVEGACIÓN ---
-menu = st.sidebar.selectbox("Menú de Opciones", ["1. BUSCAR", "2. MODIFICAR & MOVER", "3. LOCALIZACIONES"])
+menu = st.sidebar.selectbox("Menú de Opciones", ["1. BUSCAR", "2. MODIFICAR & MOVER", "3. LOCALIZACIONES", "4. PRÉSTAMOS E HISTORIAL"])
 
 # ==========================================
 # 1. BUSCAR
@@ -346,7 +345,7 @@ if menu == "1. BUSCAR":
 # ==========================================
 elif menu == "2. MODIFICAR & MOVER":
     st.header("⚙️ Modificar el Inventario")
-    sub_menu = st.radio("Selecciona acción:", ["2.1 Entradas (Formulario de Alta)", "2.3 Mover / Prestar Ítems"])
+    sub_menu = st.radio("Selecciona acción:", ["2.1 Entradas (Formulario de Alta)", "2.2 Mover Ítems"])
     
     conn = get_connection()
     cursor = conn.cursor()
@@ -412,8 +411,8 @@ elif menu == "2. MODIFICAR & MOVER":
                     except Exception as e:
                         st.error(f"Error al guardar: {e}")
 
-    elif sub_menu == "2.3 Mover / Prestar Ítems":
-        st.subheader("🚚 Mover o Prestar Ítems")
+    elif sub_menu == "2.2 Mover Ítems":
+        st.subheader("🚚 Mover Ítems a otra Ubicación")
         conn = get_connection()
         cursor = conn.cursor()
         cursor.execute("SELECT nombre, cantidad, localizacion, sublocalizacion FROM items")
@@ -425,24 +424,17 @@ elif menu == "2. MODIFICAR & MOVER":
         else:
             item_dict = {f"{i[0]} (Stock: {i[1]} | Ubicación: {i[2]} > {i[3]})": i for i in items_db}
             
-            with st.form("form_movimiento_prestamo"):
+            with st.form("form_movimiento"):
                 seleccion_items = st.multiselect("Selecciona ítems a mover:", list(item_dict.keys()))
-                destino_opciones = locs + ["Préstamos"]
-                dest_loc = st.selectbox("Localización Destino", destino_opciones)
-                
-                st.markdown("---")
-                st.subheader("📋 Datos obligatorios en caso de Préstamo")
-                receptor = st.text_input("Nombre del Receptor (Obligatorio si es Préstamo)")
-                admin_id = st.text_input("Admin que lo hizo (Obligatorio si es Préstamo)")
-                fecha_dev = st.date_input("Fecha límite de devolución", value=datetime.now() + timedelta(days=7))
+                dest_loc = st.selectbox("Localización Destino", locs if locs else ["Sin localizaciones"])
                 
                 procesar = st.form_submit_button("Procesar Movimiento")
                 
                 if procesar:
                     if not seleccion_items:
                         st.error("Selecciona al menos un ítem.")
-                    elif dest_loc == "Préstamos" and (not receptor.strip() or not admin_id.strip()):
-                        st.error("⚠️ Los campos 'Nombre del Receptor' y 'Admin que lo hizo' son obligatorios para realizar un préstamo.")
+                    elif not locs:
+                        st.error("No hay localizaciones destino disponibles.")
                     else:
                         conn = get_connection()
                         cursor = conn.cursor()
@@ -455,12 +447,33 @@ elif menu == "2. MODIFICAR & MOVER":
                                 INSERT INTO movimientos (item_nombre, tipo, cantidad_afectada, origen, destino)
                                 VALUES (?, 'MOVIMIENTO', ?, ?, ?)
                             """, (i_nombre, i_cant, f"{i_loc} > {i_sub}", dest_loc))
-                            
-                            if dest_loc == "Préstamos":
-                                cursor.execute("""
-                                    INSERT INTO prestamos (item_nombre, cantidad, receptor, admin_id, fecha_prestamo, fecha_devolucion, devuelto)
-                                    VALUES (?, ?, ?, ?, datetime('now'), ?, 0)
-                                """, (i_nombre, i_cant, receptor.strip(), admin_id.strip(), fecha_dev.strftime("%Y-%m-%d")))
                                 
                         conn.commit()
-      
+                        conn.close()
+                        st.success("¡Movimiento procesado correctamente!")
+                        st.rerun()
+
+# ==========================================
+# 3. LOCALIZACIONES
+# ==========================================
+elif menu == "3. LOCALIZACIONES":
+    st.header("🏠 Gestión de Localizaciones y Sublocalizaciones")
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.subheader("Crear Localización Padre")
+        with st.form("form_loc"):
+            nueva_loc = st.text_input("Nombre de la Localización")
+            if st.form_submit_button("Crear Localización") and nueva_loc.strip():
+                try:
+                    conn = get_connection()
+                    cursor = conn.cursor()
+                    cursor.execute("INSERT INTO localizaciones (nombre_localizacion) VALUES (?)", (nueva_loc.strip(),))
+                    conn.commit()
+                    conn.close()
+                    st.success("Localización creada con éxito.")
+                    st.rerun()
+                except sqlite3.IntegrityError:
+                    st.error("Esa localización ya existe.")
+                    
+ 
