@@ -129,10 +129,10 @@ for msg in st.session_state.messages[-4:]:
     else:
         st.sidebar.success(f"{rol_icono} {msg['content']}")
 
-# --- COMPONENTE DE VOZ INTERACTIVA PARA MÓVIL ---
+# --- COMPONENTE DE VOZ INTERACTIVA Y SALUDO AUTOMÁTICO ---
 voice_component_html = """
 <div style="background-color: #f0f2f6; padding: 15px; border-radius: 10px; text-align: center;">
-    <p style="font-family: sans-serif; font-size: 14px; color: #31333F;">Pulsa para iniciar la conversación de voz:</p>
+    <p style="font-family: sans-serif; font-size: 14px; color: #31333F;">Administrador de Voz Activo:</p>
     <button id="micBtn" onclick="toggleMic()" style="background-color: #FF4B4B; color: white; border: none; padding: 10px 20px; border-radius: 20px; font-weight: bold; cursor: pointer; font-size: 16px;">🎤 Iniciar Voz</button>
     <p id="status" style="font-family: sans-serif; font-size: 12px; color: #666; margin-top: 10px;">Micrófono inactivo</p>
 </div>
@@ -140,6 +140,30 @@ voice_component_html = """
 <script>
 let recognition;
 let isListening = false;
+
+function decirTexto(texto) {
+    if ('speechSynthesis' in window) {
+        window.speechSynthesis.cancel();
+        const mensaje = new SpeechSynthesisUtterance(texto);
+        mensaje.lang = 'es-ES';
+        mensaje.rate = 1.0;
+        mensaje.pitch = 1.0;
+        
+        setTimeout(() => {
+            window.speechSynthesis.speak(mensaje);
+        }, 300);
+    }
+}
+
+window.onload = function() {
+    decirTexto("Bienvenido de nuevo jefe ¿en qué mierda puedo ayudarte?");
+};
+
+window.addEventListener('message', function(event) {
+    if (event.data && event.data.type === 'hablar') {
+        decirTexto(event.data.texto);
+    }
+});
 
 function toggleMic() {
     const btn = document.getElementById('micBtn');
@@ -280,6 +304,14 @@ if menu == "1. BUSCAR":
     
     st.subheader(f"Resultados en Tabla ({len(rows)} ítems encontrados):")
     
+    if txt_busqueda and not rows:
+        frase_no_encontrado = "Puf. Qué follón. ¿Has buscado en la p de polea?"
+        components.html(f"""
+        <script>
+            window.parent.postMessage({{type: 'hablar', texto: '{frase_no_encontrado}'}}, '*');
+        </script>
+        """, height=0)
+
     if rows:
         df = pd.DataFrame(rows, columns=[
             "Nombre", "Categoría", "Marca", "Localización", "Sublocalización", "Establecimiento",
