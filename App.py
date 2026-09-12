@@ -1,7 +1,9 @@
 import sqlite3
 import streamlit as st
+import streamlit.components.v1 as components
 from datetime import datetime, timedelta
-import openai
+import pandas as pd
+from google import genai
 
 # --- CONFIGURACIÓN DE LA BASE DE DATOS ---
 def inicializar_bd():
@@ -86,7 +88,7 @@ def get_connection():
 # --- CONFIGURACIÓN DE LA PÁGINA ---
 st.set_page_config(page_title="Gestor de Inventario Casero", layout="wide")
 
-st.title("📦 Gestor de Inventario Casero con IA Administradora")
+st.title("📦 Gestor de Inventario Casero con Administrador Gemini")
 
 # --- SISTEMA DE ALERTAS EN TIEMPO REAL ---
 conn = get_connection()
@@ -104,7 +106,7 @@ for p in prestamos_vencen:
     st.warning(f"⏳ **Alerta de Préstamo:** Atención: El préstamo de '{p[0]}' a '{p[1]}' vence el {p[2]}.")
 conn.close()
 
-# --- CONFIGURACIÓN DEL ASISTENTE INTELIGENTE CON IA ---
+# --- CONFIGURACIÓN DEL ASISTENTE INTELIGENTE CON GEMINI ---
 if "messages" not in st.session_state:
     conn = get_connection()
     cursor = conn.cursor()
@@ -115,58 +117,124 @@ if "messages" not in st.session_state:
     conn.close()
     
     saludo_inicial = f"¡Hola! Tienes {num_prestamos} avisos de préstamos pendientes y {num_bajos} ítems con stock bajo. ¿Qué quieres hacer hoy?"
-    st.session_state.messages = [{"role": "assistant", "content": saludo_inicial}]
+    st.session_state.messages = [{"role": "model", "content": saludo_inicial}]
 
 st.sidebar.markdown("---")
-st.sidebar.subheader("🎙️ Administrador IA por Voz y Texto")
+st.sidebar.subheader("🎙️ Administrador Gemini por Voz y Texto")
 
 for msg in st.session_state.messages[-4:]:
-    if msg["role"] == "assistant":
-        st.sidebar.info(f"🤖 {msg['content']}")
+    rol_icono = "🤖" if msg["role"] == "model" else "👤"
+    if msg["role"] == "model":
+        st.sidebar.info(f"{rol_icono} {msg['content']}")
     else:
-        st.sidebar.success(f"👤 {msg['content']}")
+        st.sidebar.success(f"{rol_icono} {msg['content']}")
 
-modo_entrada = st.sidebar.radio("Canal de entrada:", ["Texto", "Voz (Micrófono)"], key="canal_ia_inteligente")
-texto_usuario = ""
+# --- COMPONENTE DE VOZ INTERACTIVA PARA MÓVIL ---
+voice_component_html = """
+<div style="background-color: #f0f2f6; padding: 15px; border-radius: 10px; text-align: center;">
+    <p style="font-family: sans-serif; font-size: 14px; color: #31333F;">Pulsa para iniciar la conversación de voz:</p>
+    <button id="micBtn" onclick="toggleMic()" style="background-color: #FF4B4B; color: white; border: none; padding: 10px 20px; border-radius: 20px; font-weight: bold; cursor: pointer; font-size: 16px;">🎤 Iniciar Voz</button>
+    <p id="status" style="font-family: sans-serif; font-size: 12px; color: #666; margin-top: 10px;">Micrófono inactivo</p>
+</div>
 
-if modo_entrada == "Voz (Micrófono)":
-    audio_bytes = st.sidebar.audio_input("Dicta tu orden:")
-    if audio_bytes is not None:
-        try:
-            client = openai.OpenAI(api_key=st.secrets.get("OPENAI_API_KEY", ""))
-            transcripcion = client.audio.transcriptions.create(model="whisper-1", file=audio_bytes)
-            texto_usuario = transcripcion.text
-        except Exception as e:
-            st.sidebar.error(f"Error al transcribir: {e}")
-else:
-    texto_usuario = st.sidebar.text_input("Escribe tu orden o consulta:", key="txt_input_ia_inteligente")
+<script>
+let recognition;
+let isListening = false;
 
-if st.sidebar.button("Enviar Orden IA") and texto_usuario:
+function toggleMic() {
+    const btn = document.getElementById('micBtn');
+    const status = document.getElementById('status');
+
+    if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
+        alert('Tu navegador móvil no soporta reconocimiento de voz nativo. Usa Chrome o Safari.');
+        return;
+    }
+
+    if (!isListening) {
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        recognition = new SpeechRecognition();
+        recognition.lang = 'es-ES';
+        recognition.continuous = false;
+        recognition.interimResults = false;
+
+        recognition.onstart = function() {
+            isListening = true;
+            btn.style.backgroundColor = '#28a745';
+            btn.innerText = '🔴 Escuchando...';
+            status.innerText = 'Habla ahora...';
+        };
+
+        recognition.onresult = function(event) {
+            const speechToText = event.results[0][0].transcript;
+            status.innerText = 'Capturado: "' + speechToText + '"';
+            window.parent.postMessage({type: 'streamlit:setComponentValue', value: speechToText}, '*');
+        };
+
+        recognition.onerror = function(event) {
+            status.innerText = 'Error: ' + event.error;
+            stopMic();
+        };
+
+        recognition.onend = function() {
+            stopMic();
+        };
+
+        recognition.start();
+    } else {
+        stopMic();
+    }
+}
+
+function stopMic() {
+    isListening = false;
+    const btn = document.getElementById('micBtn');
+    const status = document.getElementById('status');
+    btn.style.backgroundColor = '#FF4B4B';
+    btn.innerText = '🎤 Iniciar Voz';
+    status.innerText = 'En pausa';
+    if (recognition) {
+        recognition.stop();
+    }
+}
+</script>
+"""
+
+texto_voz_capturado = components.html(voice_component_html, height=150)
+texto_usuario = st.sidebar.text_input("O escribe tu orden aquí:", key="txt_input_gemini")
+
+if texto_voz_capturado:
+    texto_usuario = str(texto_voz_capturado)
+
+if st.sidebar.button("Enviar Orden a Gemini") and texto_usuario:
     st.session_state.messages.append({"role": "user", "content": texto_usuario})
     
     if any(palabra in texto_usuario.lower() for palabra in ["olvíalo", "cancela", "olvida", "déjalo", "cancelar"]):
         respuesta = "Entendido, operación cancelada. ¿En qué otra cosa te puedo ayudar?"
-        st.session_state.messages.append({"role": "assistant", "content": respuesta})
+        st.session_state.messages.append({"role": "model", "content": respuesta})
         st.rerun()
     
     try:
-        client = openai.OpenAI(api_key=st.secrets.get("OPENAI_API_KEY", ""))
-        historial_prompt = [
-            {"role": "system", "content": "Eres una IA avanzada, amable y experta que actúa como administradora absoluta de un sistema de inventario casero en SQLite. Responde de forma natural a cualquier pregunta general o conversacional, pero si el usuario te pide gestionar entradas, consultas o cambios en el inventario, guíale o indícale cómo proceder con precisión."}
-        ]
-        for m in st.session_state.messages[-6:]:
-            historial_prompt.append({"role": m["role"], "content": m["content"]})
-            
-        response = client.chat.completions.create(
-            model="gpt-4o",
-            messages=historial_prompt,
-            temperature=0.7
-        )
-        respuesta = response.choices[0].message.content
-    except Exception as e:
-        respuesta = f"Error al conectar con la IA: {e}"
+        client = genai.Client(api_key=st.secrets.get("GEMINI_API_KEY", ""))
         
-    st.session_state.messages.append({"role": "assistant", "content": respuesta})
+        historial_gemini = []
+        for m in st.session_state.messages[-6:]:
+            rol = "user" if m["role"] == "user" else "model"
+            historial_gemini.append({"role": rol, "parts": [{"text": m["content"]}]})
+            
+        chat = client.chats.create(
+            model="gemini-2.5-flash",
+            history=historial_gemini[:-1],
+            config={
+                "system_instruction": "Eres una IA avanzada, amable y experta que actúa como administradora absoluta de un sistema de inventario casero en SQLite. Responde de forma natural a cualquier pregunta general o conversacional, pero si el usuario te pide gestionar entradas, consultas o cambios en el inventario, guíale o indícale cómo proceder con precisión."
+            }
+        )
+        
+        response = chat.send_message(texto_usuario)
+        respuesta = response.text
+    except Exception as e:
+        respuesta = f"Error al conectar con Gemini: {e}"
+        
+    st.session_state.messages.append({"role": "model", "content": respuesta})
     st.rerun()
 
 # --- MENÚ DE NAVEGACIÓN ---
@@ -213,7 +281,6 @@ if menu == "1. BUSCAR":
     st.subheader(f"Resultados en Tabla ({len(rows)} ítems encontrados):")
     
     if rows:
-        import pandas as pd
         df = pd.DataFrame(rows, columns=[
             "Nombre", "Categoría", "Marca", "Localización", "Sublocalización", "Establecimiento",
             "Cantidad", "Stock Mín.", "Estado/Uso", "Descripción", "Anotaciones", "Última Modif."
@@ -368,4 +435,3 @@ elif menu == "3. LOCALIZACIONES":
                     conn.close()
                     st.success("Sublocalización añadida.")
                     st.rerun()
-            
