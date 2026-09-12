@@ -155,19 +155,16 @@ function decirTexto(texto) {
     }
 }
 
-// Saludo inicial solo la primera vez que carga
 if (!window.saludoRealizado) {
     window.saludoRealizado = true;
     window.onload = function() {
         decirTexto("Bienvenido de nuevo jefe ¿en qué mierda puedo ayudarte?");
     };
-    // Por si onload ya pasó en Streamlit
     setTimeout(() => {
         decirTexto("Bienvenido de nuevo jefe ¿en qué mierda puedo ayudarte?");
     }, 500);
 }
 
-// Escuchar eventos enviados desde Python para hablar (ej. error de búsqueda)
 window.addEventListener('message', function(event) {
     if (event.data && event.data.type === 'hablar') {
         decirTexto(event.data.texto);
@@ -232,8 +229,7 @@ function stopMic() {
 </script>
 """
 
-# Renderizamos el componente de voz y evitamos que devuelva objetos no deseados capturando solo texto limpio si lo hay
-componente_voz_salida = components.html(voice_component_html, height=150)
+components.html(voice_component_html, height=150)
 
 texto_usuario = st.sidebar.text_input("O escribe tu orden aquí:", key="txt_input_gemini")
 
@@ -473,4 +469,8 @@ elif menu == "3. LOCALIZACIONES":
                 cursor.execute("SELECT id FROM localizaciones WHERE nombre_localizacion = ?", (loc_padre,))
                 res = cursor.fetchone()
                 if res:
-               
+                    cursor.execute("INSERT INTO sublocalizaciones (localizacion_id, nombre_sublocalizacion) VALUES (?, ?)", (res[0], nueva_subloc.strip()))
+                    conn.commit()
+                    conn.close()
+                    st.success("Sublocalización añadida.")
+                    st.rerun()
