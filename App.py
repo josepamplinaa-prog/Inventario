@@ -129,7 +129,7 @@ for msg in st.session_state.messages[-4:]:
     else:
         st.sidebar.success(f"{rol_icono} {msg['content']}")
 
-# --- COMPONENTE DE VOZ INTERACTIVA Y SALUDO AUTOMÁTICO ---
+# --- COMPONENTE UNIFICADO DE VOZ (SALUDO + RECONOCIMIENTO + ALERTAS DE AUDIO) ---
 voice_component_html = """
 <div style="background-color: #f0f2f6; padding: 15px; border-radius: 10px; text-align: center;">
     <p style="font-family: sans-serif; font-size: 14px; color: #31333F;">Administrador de Voz Activo:</p>
@@ -155,10 +155,19 @@ function decirTexto(texto) {
     }
 }
 
-window.onload = function() {
-    decirTexto("Bienvenido de nuevo jefe ¿en qué mierda puedo ayudarte?");
-};
+// Saludo inicial solo la primera vez que carga
+if (!window.saludoRealizado) {
+    window.saludoRealizado = true;
+    window.onload = function() {
+        decirTexto("Bienvenido de nuevo jefe ¿en qué mierda puedo ayudarte?");
+    };
+    // Por si onload ya pasó en Streamlit
+    setTimeout(() => {
+        decirTexto("Bienvenido de nuevo jefe ¿en qué mierda puedo ayudarte?");
+    }, 500);
+}
 
+// Escuchar eventos enviados desde Python para hablar (ej. error de búsqueda)
 window.addEventListener('message', function(event) {
     if (event.data && event.data.type === 'hablar') {
         decirTexto(event.data.texto);
@@ -223,11 +232,10 @@ function stopMic() {
 </script>
 """
 
-texto_voz_capturado = components.html(voice_component_html, height=150)
-texto_usuario = st.sidebar.text_input("O escribe tu orden aquí:", key="txt_input_gemini")
+# Renderizamos el componente de voz y evitamos que devuelva objetos no deseados capturando solo texto limpio si lo hay
+componente_voz_salida = components.html(voice_component_html, height=150)
 
-if texto_voz_capturado:
-    texto_usuario = str(texto_voz_capturado)
+texto_usuario = st.sidebar.text_input("O escribe tu orden aquí:", key="txt_input_gemini")
 
 if st.sidebar.button("Enviar Orden a Gemini") and texto_usuario:
     st.session_state.messages.append({"role": "user", "content": texto_usuario})
@@ -238,23 +246,27 @@ if st.sidebar.button("Enviar Orden a Gemini") and texto_usuario:
         st.rerun()
     
     try:
-        client = genai.Client(api_key=st.secrets.get("GEMINI_API_KEY", ""))
-        
-        historial_gemini = []
-        for m in st.session_state.messages[-6:]:
-            rol = "user" if m["role"] == "user" else "model"
-            historial_gemini.append({"role": rol, "parts": [{"text": m["content"]}]})
+        api_key_val = st.secrets.get("GEMINI_API_KEY", "")
+        if not api_key_val:
+            respuesta = "Error: No se ha configurado la GEMINI_API_KEY en los secretos de Streamlit."
+        else:
+            client = genai.Client(api_key=api_key_val)
             
-        chat = client.chats.create(
-            model="gemini-2.5-flash",
-            history=historial_gemini[:-1],
-            config={
-                "system_instruction": "Eres una IA avanzada, amable y experta que actúa como administradora absoluta de un sistema de inventario casero en SQLite. Responde de forma natural a cualquier pregunta general o conversacional, pero si el usuario te pide gestionar entradas, consultas o cambios en el inventario, guíale o indícale cómo proceder con precisión."
-            }
-        )
-        
-        response = chat.send_message(texto_usuario)
-        respuesta = response.text
+            historial_gemini = []
+            for m in st.session_state.messages[-6:]:
+                rol = "user" if m["role"] == "user" else "model"
+                historial_gemini.append({"role": rol, "parts": [{"text": m["content"]}]})
+                
+            chat = client.chats.create(
+                model="gemini-2.5-flash",
+                history=historial_gemini[:-1],
+                config={
+                    "system_instruction": "Eres una IA avanzada, amable y experta que actúa como administradora absoluta de un sistema de inventario casero en SQLite. Responde de forma natural a cualquier pregunta general o conversacional, pero si el usuario te pide gestionar entradas, consultas o cambios en el inventario, guíale o indícale cómo proceder con precisión."
+                }
+            )
+            
+            response = chat.send_message(texto_usuario)
+            respuesta = response.text
     except Exception as e:
         respuesta = f"Error al conectar con Gemini: {e}"
         
@@ -461,8 +473,4 @@ elif menu == "3. LOCALIZACIONES":
                 cursor.execute("SELECT id FROM localizaciones WHERE nombre_localizacion = ?", (loc_padre,))
                 res = cursor.fetchone()
                 if res:
-                    cursor.execute("INSERT INTO sublocalizaciones (localizacion_id, nombre_sublocalizacion) VALUES (?, ?)", (res[0], nueva_subloc.strip()))
-                    conn.commit()
-                    conn.close()
-                    st.success("Sublocalización añadida.")
-                    st.rerun()
+               
