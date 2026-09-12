@@ -468,4 +468,5 @@ elif menu == "3. LOCALIZACIONES":
                 cursor.execute("SELECT id FROM localizaciones WHERE nombre_localizacion = ?", (loc_padre,))
                 res = cursor.fetchone()
                 if res:
-                    cursor.execute("INSERT INTO sublocalizaciones (localizacion_id, nombre_sub
+                    cursor.execute("INSERT INTO sublocalizaciones (localizacion_id, nombre_sublocalizacion) VALUES (?, ?)", (res[0], nueva_subloc.strip()))
+                    
