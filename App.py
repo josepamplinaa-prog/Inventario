@@ -320,7 +320,7 @@ if menu == "1. BUSCAR":
     else:
         st.info("No se encontraron registros coincidentes.")
         if txt_busqueda:
-            frase_no_encontrado = "Pfff que follón, ¿Eso no estabaaaaaa por la p de polea?"
+            frase_no_encontrado = "Puf..........que follón, ¿Eso no estaba por la p de polea?"
             components.html(f"""
             <script>
                 if ('speechSynthesis' in window) {{
