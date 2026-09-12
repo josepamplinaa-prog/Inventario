@@ -348,7 +348,8 @@ elif menu == "3. LOCALIZACIONES":
         conn.close()
         
         with st.form("form_subloc"):
-            loc_padre_elegida = st.selectbox("Localización Padre", locs_padre if locs_padre_elegida := locs_padre else ["Crea una localización primero"])
+             opciones_locs = locs_padre if locs_padre else ["Crea una localización primero"]
+loc_padre_elegida = st.selectbox("Localización Padre", opciones_locs)
             nueva_subloc = st.text_input("Nombre de la Sublocalización (ej. Estantería 2, Caja Roja)")
             btn_crear_subloc = st.form_submit_button("Crear Sublocalización")
             
