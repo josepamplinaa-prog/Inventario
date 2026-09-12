@@ -320,7 +320,7 @@ if menu == "1. BUSCAR":
     else:
         st.info("No se encontraron registros coincidentes.")
         if txt_busqueda:
-            frase_no_encontrado = "Puf..........que follón, ¿Eso no estaba por la p de polea?"
+            frase_no_encontrado = "Pfff que follón, ¿Eso no estabaaaaaa por la p de polea?"
             components.html(f"""
             <script>
                 if ('speechSynthesis' in window) {{
@@ -435,6 +435,23 @@ elif menu == "2. MODIFICAR & MOVER":
                     conn.commit()
                     conn.close()
                     st.success("¡Movimiento realizado correctamente!")
+                    
+                    # Si el destino seleccionado es Préstamos, disparamos la frase de voz solicitada
+                    if dest_loc == "Préstamos":
+                        frase_prestamo = "tu sigue, tú sigue mariquita, no crees en dios y vas a creer en ala."
+                        components.html(f"""
+                        <script>
+                            if ('speechSynthesis' in window) {{
+                                window.speechSynthesis.cancel();
+                                const mensaje = new SpeechSynthesisUtterance('{frase_prestamo}');
+                                mensaje.lang = 'es-ES';
+                                mensaje.rate = 1.0;
+                                mensaje.pitch = 1.0;
+                                window.speechSynthesis.speak(mensaje);
+                            }}
+                        </script>
+                        """, height=0)
+                    
                     st.rerun()
 
 # ==========================================
