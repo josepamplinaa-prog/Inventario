@@ -323,14 +323,14 @@ if menu == "1. BUSCAR":
             frase_no_encontrado = "Pfff que follón, ¿Eso no estabaaaaaa por la p de polea?"
             components.html(f"""
             <script>
-                if ('speechSynthesis' in window) {
+                if ('speechSynthesis' in window) {{
                     window.speechSynthesis.cancel();
                     const mensaje = new SpeechSynthesisUtterance('{frase_no_encontrado}');
                     mensaje.lang = 'es-ES';
                     mensaje.rate = 1.0;
                     mensaje.pitch = 1.0;
                     window.speechSynthesis.speak(mensaje);
-                }
+                }}
             </script>
             """, height=0)
 
