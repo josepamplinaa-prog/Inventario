@@ -156,7 +156,6 @@ function decirTexto(texto) {
 
 function desbloquearYAblar(texto) {
     if ('speechSynthesis' in window) {
-        // Truco para desbloquear el audio en móviles mediante interacción táctil
         const dummy = new SpeechSynthesisUtterance("");
         window.speechSynthesis.speak(dummy);
         setTimeout(() => {
@@ -469,4 +468,4 @@ elif menu == "3. LOCALIZACIONES":
                 cursor.execute("SELECT id FROM localizaciones WHERE nombre_localizacion = ?", (loc_padre,))
                 res = cursor.fetchone()
                 if res:
-            
+                    cursor.execute("INSERT INTO sublocalizaciones (localizacion_id, nombre_sub
