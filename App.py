@@ -106,7 +106,6 @@ menu = st.sidebar.selectbox("Menú de Opciones", ["1. BUSCAR", "2. MODIFICAR & M
 if menu == "1. BUSCAR":
     st.header("🔍 Buscar en el Inventario")
     
-    # Manejo de estado para cuando se hace clic en una celda/criterio específico
     if "filtro_click" not in st.session_state:
         st.session_state.filtro_click = ""
 
@@ -141,20 +140,17 @@ if menu == "1. BUSCAR":
     st.subheader(f"Resultados en Tabla ({len(rows)} ítems encontrados):")
     
     if rows:
-        # Preparamos los datos estructurados en formato tabla tipo Excel
         import pandas as pd
         df = pd.DataFrame(rows, columns=[
             "Nombre", "Marca", "Establecimiento", "Localización", "Sublocalización", 
             "Cantidad", "Stock Mín.", "Estado/Uso", "Descripción", "Anotaciones", "Última Modif."
         ])
         
-        # Mostramos la tabla interactiva de Streamlit (permite ordenar columnas, redimensionar, etc.)
         st.dataframe(df, use_container_width=True, hide_index=True)
         
         st.markdown("---")
-        st.markdown("💡 **Filtrar por clic rápido:** Pulsa sobre cualquier valor de la lista inferior para mostrar automáticamente todos los registros que coincidan con él:")
+        st.markdown("💡 **Filtrar por clic rápido:** Pulsa sobre cualquier valor para mostrar todos los registros coincidentes:")
         
-        # Extraer valores únicos para marcas, localizaciones, establecimientos y estados para hacer clic rápido
         marcas_unicas = sorted(list(set([r[1] for r in rows if r[1]])))
         estab_unicos = sorted(list(set([r[2] for r in rows if r[2]])))
         locs_unicas = sorted(list(set([r[3] for r in rows if r[3]])))
@@ -388,4 +384,85 @@ elif menu == "2. MODIFICAR & MOVER":
                                             """, (itm_n, itm_c, f"{l_origen} > {s_origen}"))
                                         conn_m.commit()
                                         conn_m.close()
-                                        st.
+                                        st.success("¡Todos los ítems de la sublocalización han sido prestados con éxito!")
+                                        st.rerun()
+                            modal_prestamo_masivo()
+                        else:
+                            for itm_n, itm_c in items_en_subloc:
+                                cursor.execute("UPDATE items SET localizacion = ?, sublocalizacion = '' WHERE nombre = ?", (dest_loc_masivo, itm_n))
+                                cursor.execute("""
+                                    INSERT INTO movimientos (item_nombre, tipo, cantidad_afectada, origen, destino)
+                                    VALUES (?, 'MOVIMIENTO', ?, ?, ?)
+                                """, (itm_n, itm_c, f"{l_origen} > {s_origen}", dest_loc_masivo))
+                            conn.commit()
+                            conn.close()
+                            st.success(f"¡Todos los ítems de '{subloc_elegida_str}' han sido movidos a '{dest_loc_masivo}'!")
+                            st.rerun()
+
+# ==========================================
+# 3. LOCALIZACIONES
+# ==========================================
+elif menu == "3. LOCALIZACIONES":
+    st.header("🏠 Gestión de Localizaciones y Sublocalizaciones")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.subheader("Añadir Localización Principal")
+        with st.form("form_loc"):
+            nueva_loc = st.text_input("Nombre de la Localización (ej. Cochera, Trastero)")
+            btn_crear_loc = st.form_submit_button("Crear Localización")
+            if btn_crear_loc and nueva_loc.strip():
+                try:
+                    conn = get_connection()
+                    cursor = conn.cursor()
+                    cursor.execute("INSERT INTO localizaciones (nombre_localizacion) VALUES (?)", (nueva_loc.strip(),))
+                    conn.commit()
+                    conn.close()
+                    st.success(f"Localización '{nueva_loc}' creada con éxito.")
+                    st.rerun()
+                except sqlite3.IntegrityError:
+                    st.error("Esa localización ya existe.")
+                    
+    with col2:
+        st.subheader("Añadir Sublocalización")
+        conn = get_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT nombre_localizacion FROM localizaciones")
+        locs_padre = [r[0] for r in cursor.fetchall()]
+        conn.close()
+        
+        with st.form("form_subloc"):
+            opciones_locs = locs_padre if locs_padre else ["Crea una localización primero"]
+            loc_padre_elegida = st.selectbox("Localización Padre", opciones_locs)
+            nueva_subloc = st.text_input("Nombre de la Sublocalización (ej. Estantería 2, Caja Roja)")
+            btn_crear_subloc = st.form_submit_button("Crear Sublocalización")
+            
+            if btn_crear_subloc and nueva_subloc.strip() and locs_padre:
+                conn = get_connection()
+                cursor = conn.cursor()
+                cursor.execute("SELECT id FROM localizaciones WHERE nombre_localizacion = ?", (loc_padre_elegida,))
+                res = cursor.fetchone()
+                if res:
+                    cursor.execute("INSERT INTO sublocalizaciones (localizacion_id, nombre_sublocalizacion) VALUES (?, ?)", (res[0], nueva_subloc.strip()))
+                    conn.commit()
+                    conn.close()
+                    st.success(f"Sublocalización '{nueva_subloc}' añadida a '{loc_padre_elegida}'.")
+                    st.rerun()
+
+    st.markdown("---")
+    st.subheader("Estancias y Subestancias Actuales:")
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT id, nombre_localizacion FROM localizaciones")
+    locs_data = cursor.fetchall()
+    for l_id, l_nombre in locs_data:
+        cursor.execute("SELECT nombre_sublocalizacion FROM sublocalizaciones WHERE localizacion_id = ?", (l_id,))
+        sublocs_data = [s[0] for s in cursor.fetchall()]
+        st.markdown(f"📍 **{l_nombre}**")
+        if sublocs_data:
+            for s in sublocs_data:
+                st.markdown(f"&nbsp;&nbsp;&nbsp;&nbsp;└─ {s}")
+        else:
+            st.markdown("&nbsp;&nbsp;&nbsp;&nbsp;└─ *(Sin sublocalizaciones)*")
+    conn.close()
