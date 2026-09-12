@@ -1,6 +1,7 @@
 import sqlite3
 import streamlit as st
 from datetime import datetime, timedelta
+import openai
 
 # --- CONFIGURACIÓN DE LA BASE DE DATOS ---
 def inicializar_bd():
@@ -42,7 +43,6 @@ def inicializar_bd():
         )
     """)
     
-    # Migración de seguridad por si la tabla items ya existía sin la columna 'categoria'
     cursor.execute("PRAGMA table_info(items)")
     columnas_items = [col[1] for col in cursor.fetchall()]
     if "categoria" not in columnas_items:
@@ -104,6 +104,114 @@ for p in prestamos_vencen:
     st.warning(f"⏳ **Alerta de Préstamo:** Atención: El préstamo de '{p[0]}' a '{p[1]}' vence el {p[2]}.")
 conn.close()
 
+# --- CONFIGURACIÓN DEL ASISTENTE CONVERSACIONAL ---
+if "chat_state" not in st.session_state:
+    st.session_state.chat_state = "IDLE"
+    st.session_state.temp_data = {}
+    st.session_state.messages = []
+
+if not st.session_state.get("proactive_greeted", False):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT COUNT(*) FROM prestamos WHERE devuelto = 0")
+    num_prestamos = cursor.fetchone()[0]
+    cursor.execute("SELECT COUNT(*) FROM items WHERE cantidad <= stock_minimo")
+    num_bajos = cursor.fetchone()[0]
+    conn.close()
+    
+    saludo_inicial = f"¡Hola! Tienes {num_prestamos} avisos de préstamos pendientes y {num_bajos} ítems con stock bajo. ¿Qué quieres hacer hoy?"
+    st.session_state.messages.append({"role": "assistant", "content": saludo_inicial})
+    st.session_state.proactive_greeted = True
+
+st.sidebar.markdown("---")
+st.sidebar.subheader("🎙️ Asistente Conversacional IA")
+
+for msg in st.session_state.messages[-4:]:
+    if msg["role"] == "assistant":
+        st.sidebar.info(f"🤖 {msg['content']}")
+    else:
+        st.sidebar.success(f"👤 {msg['content']}")
+
+modo_entrada = st.sidebar.radio("Canal de entrada:", ["Texto", "Voz (Micrófono)"], key="canal_ia")
+texto_usuario = ""
+
+if modo_entrada == "Voz (Micrófono)":
+    audio_bytes = st.sidebar.audio_input("Dicta tu orden:")
+    if audio_bytes is not None:
+        try:
+            client = openai.OpenAI(api_key=st.secrets.get("OPENAI_API_KEY", ""))
+            transcripcion = client.audio.transcriptions.create(
+                model="whisper-1",
+                file=audio_bytes
+            )
+            texto_usuario = transcripcion.text
+        except Exception as e:
+            st.sidebar.error(f"Error al transcribir audio: {e}")
+else:
+    texto_usuario = st.sidebar.text_input("Escribe tu orden o respuesta:", key="txt_input_ia")
+
+if st.sidebar.button("Enviar Orden") and texto_usuario:
+    st.session_state.messages.append({"role": "user", "content": texto_usuario})
+    
+    estado = st.session_state.chat_state
+    
+    if estado == "IDLE":
+        texto_lower = texto_usuario.lower()
+        if "entrada" in texto_lower or "añadir" in texto_lower or "nuevo item" in texto_lower:
+            st.session_state.chat_state = "WAITING_NAME"
+            st.session_state.temp_data = {}
+            respuesta = "Perfecto, hagamos una entrada. Dime, ¿qué artículo quieres añadir?"
+        else:
+            try:
+                client = openai.OpenAI(api_key=st.secrets.get("OPENAI_API_KEY", ""))
+                response = client.chat.completions.create(
+                    model="gpt-4o",
+                    messages=[
+                        {"role": "system", "content": "Eres el administrador absoluto de un inventario en SQLite con tablas items, prestamos, movimientos. Interpreta la orden del usuario y responde de forma concisa confirmando la acción realizada."},
+                        {"role": "user", "content": texto_usuario}
+                    ]
+                )
+                respuesta = response.choices[0].message.content
+            except Exception as e:
+                respuesta = f"No se pudo procesar la orden compleja: {e}"
+                
+        st.session_state.messages.append({"role": "assistant", "content": respuesta})
+        st.rerun()
+        
+    elif estado == "WAITING_NAME":
+        st.session_state.temp_data["nombre"] = texto_usuario
+        st.session_state.chat_state = "WAITING_CAT"
+        respuesta = f"Entendido, '{texto_usuario}'. ¿En qué categoría lo guardamos?"
+        st.session_state.messages.append({"role": "assistant", "content": respuesta})
+        st.rerun()
+        
+    elif estado == "WAITING_CAT":
+        st.session_state.temp_data["categoria"] = texto_usuario
+        st.session_state.chat_state = "WAITING_MARCA"
+        respuesta = "¿Sabemos la marca o referencia?"
+        st.session_state.messages.append({"role": "assistant", "content": respuesta})
+        st.rerun()
+        
+    elif estado == "WAITING_MARCA":
+        st.session_state.temp_data["marca"] = texto_usuario
+        nombre = st.session_state.temp_data.get("nombre")
+        cat = st.session_state.temp_data.get("categoria")
+        marca = texto_usuario
+        
+        conn = get_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT OR REPLACE INTO items (nombre, categoria, marca, cantidad, stock_minimo, estado_stock)
+            VALUES (?, ?, ?, 1, 1, 'normal')
+        """, (nombre, cat, marca))
+        conn.commit()
+        conn.close()
+        
+        st.session_state.chat_state = "IDLE"
+        respuesta = f"¡Listo! Se ha guardado '{nombre}' (Categoría: {cat}, Marca: {marca}) con éxito en el inventario."
+        st.session_state.messages.append({"role": "assistant", "content": respuesta})
+        st.rerun()
+
 # --- MENÚ DE NAVEGACIÓN ---
 menu = st.sidebar.selectbox("Menú de Opciones", ["1. BUSCAR", "2. MODIFICAR & MOVER", "3. LOCALIZACIONES"])
 
@@ -129,7 +237,6 @@ if menu == "1. BUSCAR":
     conn = get_connection()
     cursor = conn.cursor()
     
-    # Consulta seleccionando columnas en el nuevo orden ordenado
     query_cols = "nombre, categoria, marca, localizacion, sublocalizacion, establecimiento, cantidad, stock_minimo, estado_uso, descripcion, anotaciones, ultima_modificacion"
     
     if txt_busqueda:
@@ -161,7 +268,6 @@ if menu == "1. BUSCAR":
         st.markdown("---")
         st.markdown("💡 **Filtrar por clic rápido:** Pulsa sobre cualquier valor para mostrar todos los registros coincidentes:")
         
-        # Extracción de valores únicos para los botones de clic rápido
         categorias_unicas = sorted(list(set([r[1] for r in rows if r[1]])))
         marcas_unicas = sorted(list(set([r[2] for r in rows if r[2]])))
         locs_unicas = sorted(list(set([r[3] for r in rows if r[3]])))
@@ -169,7 +275,6 @@ if menu == "1. BUSCAR":
         estab_unicos = sorted(list(set([r[5] for r in rows if r[5]])))
         usos_unicos = sorted(list(set([r[8] for r in rows if r[8]])))
         
-        # Distribuimos los bloques de botones en columnas organizadas
         cols_tags = st.columns(3)
         with cols_tags[0]:
             if categorias_unicas:
