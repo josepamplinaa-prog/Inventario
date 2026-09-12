@@ -144,7 +144,6 @@ else:
 if st.sidebar.button("Enviar Orden IA") and texto_usuario:
     st.session_state.messages.append({"role": "user", "content": texto_usuario})
     
-    # Comprobar si el usuario quiere cancelar o abortar
     if any(palabra in texto_usuario.lower() for palabra in ["olvíalo", "cancela", "olvida", "déjalo", "cancelar"]):
         respuesta = "Entendido, operación cancelada. ¿En qué otra cosa te puedo ayudar?"
         st.session_state.messages.append({"role": "assistant", "content": respuesta})
@@ -152,8 +151,6 @@ if st.sidebar.button("Enviar Orden IA") and texto_usuario:
     
     try:
         client = openai.OpenAI(api_key=st.secrets.get("OPENAI_API_KEY", ""))
-        
-        # Historial dinámico con rol administrador de base de datos e inventario
         historial_prompt = [
             {"role": "system", "content": "Eres una IA avanzada, amable y experta que actúa como administradora absoluta de un sistema de inventario casero en SQLite. Responde de forma natural a cualquier pregunta general o conversacional, pero si el usuario te pide gestionar entradas, consultas o cambios en el inventario, guíale o indícale cómo proceder con precisión."}
         ]
@@ -423,4 +420,6 @@ elif menu == "2. MODIFICAR & MOVER":
                 conn = get_connection()
                 cursor = conn.cursor()
                 cursor.execute("""
-                    SELECT DISTINCT l
+                    SELECT DISTINCT l.nombre_localizacion, s.nombre_sublocalizacion 
+                    FROM sublocalizaciones s 
+                    JOIN localizaciones l ON s.local
