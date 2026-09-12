@@ -26,6 +26,7 @@ def inicializar_bd():
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS items (
             nombre TEXT PRIMARY KEY,
+            categoria TEXT,
             marca TEXT,
             establecimiento TEXT,
             localizacion TEXT,
@@ -40,6 +41,12 @@ def inicializar_bd():
             ultima_modificacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
+    
+    # Migración de seguridad por si la tabla items ya existía sin la columna 'categoria'
+    cursor.execute("PRAGMA table_info(items)")
+    columnas_items = [col[1] for col in cursor.fetchall()]
+    if "categoria" not in columnas_items:
+        cursor.execute("ALTER TABLE items ADD COLUMN categoria TEXT")
     
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS movimientos (
@@ -113,7 +120,7 @@ if menu == "1. BUSCAR":
     with col_b1:
         txt_busqueda = st.text_input("Término de búsqueda:", value=st.session_state.filtro_click)
     with col_b2:
-        criterio = st.selectbox("Filtrar por criterio:", ["Todos", "localizacion", "sublocalizacion", "marca", "establecimiento", "estado_uso"])
+        criterio = st.selectbox("Filtrar por criterio:", ["Todos", "categoria", "marca", "localizacion", "sublocalizacion", "establecimiento", "estado_uso"])
     with col_b3:
         if st.button("Limpiar Filtro"):
             st.session_state.filtro_click = ""
@@ -122,17 +129,20 @@ if menu == "1. BUSCAR":
     conn = get_connection()
     cursor = conn.cursor()
     
+    # Consulta seleccionando columnas en el nuevo orden ordenado
+    query_cols = "nombre, categoria, marca, localizacion, sublocalizacion, establecimiento, cantidad, stock_minimo, estado_uso, descripcion, anotaciones, ultima_modificacion"
+    
     if txt_busqueda:
         texto = f"%{txt_busqueda}%"
         if criterio == "Todos":
-            query = """SELECT nombre, marca, establecimiento, localizacion, sublocalizacion, cantidad, stock_minimo, estado_uso, descripcion, anotaciones, ultima_modificacion FROM items 
-                       WHERE nombre LIKE ? OR descripcion LIKE ? OR marca LIKE ? OR establecimiento LIKE ? OR localizacion LIKE ? OR sublocalizacion LIKE ? OR estado_uso LIKE ?"""
-            cursor.execute(query, (texto, texto, texto, texto, texto, texto, texto))
+            query = f"""SELECT {query_cols} FROM items 
+                       WHERE nombre LIKE ? OR descripcion LIKE ? OR categoria LIKE ? OR marca LIKE ? OR localizacion LIKE ? OR sublocalizacion LIKE ? OR establecimiento LIKE ? OR estado_uso LIKE ?"""
+            cursor.execute(query, (texto, texto, texto, texto, texto, texto, texto, texto))
         else:
-            query = f"SELECT nombre, marca, establecimiento, localizacion, sublocalizacion, cantidad, stock_minimo, estado_uso, descripcion, anotaciones, ultima_modificacion FROM items WHERE {criterio} LIKE ?"
+            query = f"SELECT {query_cols} FROM items WHERE {criterio} LIKE ?"
             cursor.execute(query, (texto,))
     else:
-        cursor.execute("SELECT nombre, marca, establecimiento, localizacion, sublocalizacion, cantidad, stock_minimo, estado_uso, descripcion, anotaciones, ultima_modificacion FROM items")
+        cursor.execute(f"SELECT {query_cols} FROM items")
         
     rows = cursor.fetchall()
     conn.close()
@@ -142,7 +152,7 @@ if menu == "1. BUSCAR":
     if rows:
         import pandas as pd
         df = pd.DataFrame(rows, columns=[
-            "Nombre", "Marca", "Establecimiento", "Localización", "Sublocalización", 
+            "Nombre", "Categoría", "Marca", "Localización", "Sublocalización", "Establecimiento",
             "Cantidad", "Stock Mín.", "Estado/Uso", "Descripción", "Anotaciones", "Última Modif."
         ])
         
@@ -151,13 +161,23 @@ if menu == "1. BUSCAR":
         st.markdown("---")
         st.markdown("💡 **Filtrar por clic rápido:** Pulsa sobre cualquier valor para mostrar todos los registros coincidentes:")
         
-        marcas_unicas = sorted(list(set([r[1] for r in rows if r[1]])))
-        estab_unicos = sorted(list(set([r[2] for r in rows if r[2]])))
+        # Extracción de valores únicos para los botones de clic rápido
+        categorias_unicas = sorted(list(set([r[1] for r in rows if r[1]])))
+        marcas_unicas = sorted(list(set([r[2] for r in rows if r[2]])))
         locs_unicas = sorted(list(set([r[3] for r in rows if r[3]])))
-        usos_unicos = sorted(list(set([r[7] for r in rows if r[7]])))
+        sublocs_unicas = sorted(list(set([r[4] for r in rows if r[4]])))
+        estab_unicos = sorted(list(set([r[5] for r in rows if r[5]])))
+        usos_unicos = sorted(list(set([r[8] for r in rows if r[8]])))
         
-        cols_tags = st.columns(4)
+        # Distribuimos los bloques de botones en columnas organizadas
+        cols_tags = st.columns(3)
         with cols_tags[0]:
+            if categorias_unicas:
+                st.caption("🏷️ **Categorías:**")
+                for cat in categorias_unicas:
+                    if st.button(cat, key=f"cat_{cat}"):
+                        st.session_state.filtro_click = cat
+                        st.rerun()
             if marcas_unicas:
                 st.caption("🔹 **Marcas:**")
                 for m in marcas_unicas:
@@ -171,6 +191,12 @@ if menu == "1. BUSCAR":
                     if st.button(l, key=f"l_{l}"):
                         st.session_state.filtro_click = l
                         st.rerun()
+            if sublocs_unicas:
+                st.caption("📂 **Sublocalizaciones:**")
+                for sl in sublocs_unicas:
+                    if st.button(sl, key=f"sl_{sl}"):
+                        st.session_state.filtro_click = sl
+                        st.rerun()
         with cols_tags[2]:
             if estab_unicos:
                 st.caption("🛒 **Establecimientos:**")
@@ -178,7 +204,6 @@ if menu == "1. BUSCAR":
                     if st.button(e, key=f"e_{e}"):
                         st.session_state.filtro_click = e
                         st.rerun()
-        with cols_tags[3]:
             if usos_unicos:
                 st.caption("⚙️ **Estados/Usos:**")
                 for u in usos_unicos:
@@ -205,6 +230,7 @@ elif menu == "2. MODIFICAR & MOVER":
         st.subheader("📝 Dar de alta / Introducir Nuevo Ítem")
         with st.form("form_entrada"):
             nombre = st.text_input("Nombre del Ítem (Clave Principal)*")
+            categoria = st.text_input("Categoría (ej. Tarjetas Gráficas, Herramientas)")
             marca = st.text_input("Marca")
             estab = st.text_input("Establecimiento de compra")
             
@@ -214,7 +240,7 @@ elif menu == "2. MODIFICAR & MOVER":
             with col2:
                 stock_min = st.number_input("Stock Mínimo de alerta", min_value=0, value=1)
                 
-            estado_uso = st.text_input("Estado o Uso del producto (ej. Nuevo, Usado, Reparado)")
+            estado_uso = st.text_input("Estado o Uso del producto (ej. Nuevo, Usada, Reparado)")
             desc = st.text_area("Descripción")
             anot = st.text_area("Anotaciones")
             
@@ -244,9 +270,9 @@ elif menu == "2. MODIFICAR & MOVER":
                         conn = get_connection()
                         cursor = conn.cursor()
                         cursor.execute("""
-                            INSERT OR REPLACE INTO items (nombre, marca, establecimiento, localizacion, sublocalizacion, cantidad, stock_minimo, estado_uso, descripcion, anotaciones, estado_stock)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'normal')
-                        """, (nombre.strip(), marca, estab, loc_elegida, subloc_elegida if subloc_elegida != "Ninguna" else "", int(cant), int(stock_min), estado_uso, desc, anot))
+                            INSERT OR REPLACE INTO items (nombre, categoria, marca, establecimiento, localizacion, sublocalizacion, cantidad, stock_minimo, estado_uso, descripcion, anotaciones, estado_stock)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'normal')
+                        """, (nombre.strip(), categoria, marca, estab, loc_elegida, subloc_elegida if subloc_elegida != "Ninguna" else "", int(cant), int(stock_min), estado_uso, desc, anot))
                         
                         cursor.execute("""
                             INSERT INTO movimientos (item_nombre, tipo, cantidad_afectada, origen, destino)
