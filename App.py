@@ -417,83 +417,44 @@ elif menu == "2. MODIFICAR & MOVER":
             st.info("No hay ítems registrados en el inventario.")
         else:
             item_dict = {f"{i[0]} (Stock: {i[1]} | Ubicación: {i[2]} > {i[3]})": i for i in items_db}
-            seleccion_items = st.multiselect("Selecciona ítems a mover:", list(item_dict.keys()))
-            destino_opciones = locs + ["Préstamos"]
-            dest_loc = st.selectbox("Localización Destino", destino_opciones)
             
-            if st.button("Procesar Movimiento"):
-                if seleccion_items:
-                    conn = get_connection()
-                    cursor = conn.cursor()
-                    for sel in seleccion_items:
-                        i_nombre, i_cant, i_loc, i_sub = item_dict[sel]
-                        cursor.execute("UPDATE items SET localizacion = ? WHERE nombre = ?", (dest_loc, i_nombre))
-                        cursor.execute("""
-                            INSERT INTO movimientos (item_nombre, tipo, cantidad_afectada, origen, destino)
-                            VALUES (?, 'MOVIMIENTO', ?, ?, ?)
-                        """, (i_nombre, i_cant, f"{i_loc} > {i_sub}", dest_loc))
-                    conn.commit()
-                    conn.close()
-                    st.success("¡Movimiento realizado correctamente!")
-                    
-                    # Si el destino seleccionado es Préstamos, disparamos la frase de voz solicitada
-                    if dest_loc == "Préstamos":
-                        frase_prestamo = "tu sigue, tú sigue mariquita, no crees en dios y vas a creer en ala."
-                        components.html(f"""
-                        <script>
-                            if ('speechSynthesis' in window) {{
-                                window.speechSynthesis.cancel();
-                                const mensaje = new SpeechSynthesisUtterance('{frase_prestamo}');
-                                mensaje.lang = 'es-ES';
-                                mensaje.rate = 1.0;
-                                mensaje.pitch = 1.0;
-                                window.speechSynthesis.speak(mensaje);
-                            }}
-                        </script>
-                        """, height=0)
-                    
-                    st.rerun()
-
-# ==========================================
-# 3. LOCALIZACIONES
-# ==========================================
-elif menu == "3. LOCALIZACIONES":
-    st.header("🏠 Gestión de Localizaciones y Sublocalizaciones")
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        with st.form("form_loc"):
-            nueva_loc = st.text_input("Nombre de la Localización")
-            if st.form_submit_button("Crear Localización") and nueva_loc.strip():
-                try:
-                    conn = get_connection()
-                    cursor = conn.cursor()
-                    cursor.execute("INSERT INTO localizaciones (nombre_localizacion) VALUES (?)", (nueva_loc.strip(),))
-                    conn.commit()
-                    conn.close()
-                    st.success("Localización creada.")
-                    st.rerun()
-                except sqlite3.IntegrityError:
-                    st.error("Ya existe.")
-                    
-    with col2:
-        conn = get_connection()
-        cursor = conn.cursor()
-        cursor.execute("SELECT nombre_localizacion FROM localizaciones")
-        locs_padre = [r[0] for r in cursor.fetchall()]
-        conn.close()
-        
-        with st.form("form_subloc"):
-            loc_padre = st.selectbox("Localización Padre", locs_padre if locs_padre else ["Crea una primero"])
-            nueva_subloc = st.text_input("Nombre de la Sublocalización")
-            if st.form_submit_button("Crear Sublocalización") and nueva_subloc.strip() and locs_padre:
-                conn = get_connection()
-                cursor = conn.cursor()
-                cursor.execute("SELECT id FROM localizaciones WHERE nombre_localizacion = ?", (loc_padre,))
-                res = cursor.fetchone()
-                if res:
-                    cursor.execute("INSERT INTO sublocalizaciones (localizacion_id, nombre_sublocalizacion) VALUES (?, ?)", (res[0], nueva_subloc.strip()))
-                    conn.commit()
-                    conn.close()
-                    st.success("Sublocalización añadida.")
-                    st.rerun()
+            with st.form("form_movimiento_prestamo"):
+                seleccion_items = st.multiselect("Selecciona ítems a mover:", list(item_dict.keys()))
+                destino_opciones = locs + ["Préstamos"]
+                dest_loc = st.selectbox("Localización Destino", destino_opciones)
+                
+                # Campos adicionales obligatorios si se selecciona Préstamos
+                st.markdown("---")
+                st.subheader("📋 Datos obligatorios en caso de Préstamo")
+                receptor = st.text_input("Nombre del Receptor (Obligatorio si es Préstamo)")
+                admin_id = st.text_input("Admin que lo hizo (Obligatorio si es Préstamo)")
+                fecha_dev = st.date_input("Fecha límite de devolución", value=datetime.now() + timedelta(days=7))
+                
+                procesar = st.form_submit_button("Procesar Movimiento")
+                
+                if procesar:
+                    if not seleccion_items:
+                        st.error("Selecciona al menos un ítem.")
+                    elif dest_loc == "Préstamos" and (not receptor.strip() or not admin_id.strip()):
+                        st.error("⚠️ Los campos 'Nombre del Receptor' y 'Admin que lo hizo' son obligatorios para realizar un préstamo.")
+                    else:
+                        conn = get_connection()
+                        cursor = conn.cursor()
+                        for sel in seleccion_items:
+                            i_nombre, i_cant, i_loc, i_sub = item_dict[sel]
+                            
+                            # Actualizamos la ubicación del ítem
+                            cursor.execute("UPDATE items SET localizacion = ? WHERE nombre = ?", (dest_loc, i_nombre))
+                            
+                            # Registramos el movimiento general
+                            cursor.execute("""
+                                INSERT INTO movimientos (item_nombre, tipo, cantidad_afectada, origen, destino)
+                                VALUES (?, 'MOVIMIENTO', ?, ?, ?)
+                            """, (i_nombre, i_cant, f"{i_loc} > {i_sub}", dest_loc))
+                            
+                            # Si el destino es Préstamos, guardamos en la tabla de préstamos
+                            if dest_loc == "Préstamos":
+                                cursor.execute("""
+                                    INSERT INTO prestamos (item_nombre, cantidad, receptor, admin_id, fecha_prestamo, fecha_devolucion, devuelto)
+                                    VALUES (?, ?, ?, ?, datetime('now'), ?, 0)
+                                """, (i_nomb
