@@ -136,16 +136,12 @@ if menu == "1. BUSCAR":
         nombre, cant, loc, subloc, uso, marca, estab, estado_s, desc, anot, ultima_mod = r
         
         prefix = ""
-        badge_color = "gray"
         if estado_s == "comprar":
             prefix = "🟢 [Comprar]"
-            badge_color = "green"
         elif estado_s == "agotado_negativo":
             prefix = "🔴 [X-Negativo]"
-            badge_color = "red"
         elif loc == "Préstamos":
             prefix = "🟡 [✈️ Préstamo]"
-            badge_color = "orange"
             
         with st.expander(f"{prefix} **{nombre}** (Cant: {cant}) — {loc} > {subloc}"):
             col_a, col_b = st.columns(2)
@@ -205,7 +201,6 @@ elif menu == "2. MODIFICAR & MOVER":
             
             loc_elegida = st.selectbox("Localización", locs if locs else ["Sin localizaciones creadas"])
             
-            # Buscar sublocalizaciones para la localización elegida
             sublocs = []
             if locs:
                 conn = get_connection()
@@ -306,12 +301,6 @@ elif menu == "2. MODIFICAR & MOVER":
                             conn.close()
                             
                             st.success(f"Movimiento de '{i_nombre}' realizado correctamente.")
-                            
-                            # Si llega a stock 0, gestionamos estado automático
-                            if nueva_cant == 0:
-                                st.warning(f"¡El ítem '{i_nombre}' ha llegado a 0 de stock!")
-                                # Nota: En la versión web interactiva de Streamlit, los diálogos de stock 0 se muestran de forma secuencial abajo:
-                            
                             st.rerun()
 
 # ==========================================
@@ -348,10 +337,10 @@ elif menu == "3. LOCALIZACIONES":
         conn.close()
         
         with st.form("form_subloc"):
-             opciones_locs = locs_padre if locs_padre else ["Crea una localización primero"]
-             loc_padre_elegida = st.selectbox("Localización Padre", opciones_locs)
-             nueva_subloc = st.text_input("Nombre de la Sublocalización (ej. Estantería 2, Caja Roja)")
-             btn_crear_subloc = st.form_submit_button("Crear Sublocalización")
+            opciones_locs = locs_padre if locs_padre else ["Crea una localización primero"]
+            loc_padre_elegida = st.selectbox("Localización Padre", opciones_locs)
+            nueva_subloc = st.text_input("Nombre de la Sublocalización (ej. Estantería 2, Caja Roja)")
+            btn_crear_subloc = st.form_submit_button("Crear Sublocalización")
             
             if btn_crear_subloc and nueva_subloc.strip() and locs_padre:
                 conn = get_connection()
