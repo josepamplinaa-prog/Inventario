@@ -304,14 +304,6 @@ if menu == "1. BUSCAR":
     
     st.subheader(f"Resultados en Tabla ({len(rows)} ítems encontrados):")
     
-    if txt_busqueda and not rows:
-        frase_no_encontrado = "Puf. Qué follón. ¿Has buscado en la p de polea?"
-        components.html(f"""
-        <script>
-            window.parent.postMessage({{type: 'hablar', texto: '{frase_no_encontrado}'}}, '*');
-        </script>
-        """, height=0)
-
     if rows:
         df = pd.DataFrame(rows, columns=[
             "Nombre", "Categoría", "Marca", "Localización", "Sublocalización", "Establecimiento",
@@ -320,6 +312,13 @@ if menu == "1. BUSCAR":
         st.dataframe(df, use_container_width=True, hide_index=True)
     else:
         st.info("No se encontraron registros coincidentes.")
+        if txt_busqueda:
+            frase_no_encontrado = "Pfff que follón, ¿Eso no estabaaaaaa por la p de polea?"
+            components.html(f"""
+            <script>
+                window.parent.postMessage({{type: 'hablar', texto: '{frase_no_encontrado}'}}, '*');
+            </script>
+            """, height=0)
 
 # ==========================================
 # 2. MODIFICAR & MOVER
